@@ -136,15 +136,27 @@ Respond with:
             var resultText = GetResponseText(result);
             state.TrendAnalysisRaw = resultText;
 
-            // Parse the response (simple parsing)
+            // Parse the response (handle markdown formatting)
             var lines = resultText.Split('\n');
-            foreach (var line in lines)
+            for (int i = 0; i < lines.Length; i++)
             {
-                if (line.Contains("Selected Topic:"))
-                    state.SelectedTopic = line.Split(':', 2).LastOrDefault()?.Trim();
-                else if (line.Contains("Sarcastic Take:"))
-                    state.SarcasticTake = line.Split(':', 2).LastOrDefault()?.Trim();
-                else if (line.Contains("Virality Potential:"))
+                var line = lines[i].Replace("**", "").Replace("###", "").Trim();
+                
+                if (line.StartsWith("Selected Topic:"))
+                {
+                    var topic = line.Substring("Selected Topic:".Length).Trim();
+                    if (string.IsNullOrEmpty(topic) && i + 1 < lines.Length)
+                        topic = lines[i + 1].Replace("**", "").Trim();
+                    state.SelectedTopic = topic;
+                }
+                else if (line.StartsWith("Sarcastic Take:"))
+                {
+                    var take = line.Substring("Sarcastic Take:".Length).Trim();
+                    if (string.IsNullOrEmpty(take) && i + 1 < lines.Length)
+                        take = lines[i + 1].Replace("**", "").Trim();
+                    state.SarcasticTake = take;
+                }
+                else if (line.StartsWith("Virality Potential:") || line.Contains("Virality Potential:"))
                 {
                     var scorePart = line.Split(':').LastOrDefault()?.Trim().Replace("%", "");
                     if (int.TryParse(scorePart, out var score))
