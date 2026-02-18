@@ -143,8 +143,12 @@ app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
     c.SwaggerEndpoint("/swagger/v1/swagger.json", "ForgeLens API v1");
-    c.RoutePrefix = string.Empty; // Swagger UI at root
+    c.RoutePrefix = "swagger"; // Swagger UI at /swagger
 });
+
+// Serve static files (Chat UI)
+app.UseDefaultFiles();
+app.UseStaticFiles();
 
 app.UseCors();
 

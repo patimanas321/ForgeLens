@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ForgeLens Agent Chat</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #eee; height: 100vh; display: flex; }
+        .sidebar { width: 250px; background: #16213e; padding: 20px; border-right: 1px solid #0f3460; }
+        .sidebar h2 { color: #e94560; margin-bottom: 20px; font-size: 1.2rem; }
+        .agent-btn { width: 100%; padding: 12px; margin-bottom: 10px; background: #0f3460; border: none; color: #eee; border-radius: 8px; cursor: pointer; text-align: left; transition: all 0.2s; }
+        .agent-btn:hover { background: #1a4080; }
+        .agent-btn.active { background: #e94560; }
+        .agent-btn .name { font-weight: 600; display: block; }
+        .agent-btn .desc { font-size: 0.75rem; color: #aaa; margin-top: 4px; }
+        .main { flex: 1; display: flex; flex-direction: column; }
+        .header { padding: 20px; background: #16213e; border-bottom: 1px solid #0f3460; }
+        .header h1 { font-size: 1.5rem; color: #e94560; }
+        .chat-container { flex: 1; overflow-y: auto; padding: 20px; }
+        .message { max-width: 80%; margin-bottom: 16px; padding: 12px 16px; border-radius: 12px; line-height: 1.5; }
+        .message.user { background: #0f3460; margin-left: auto; }
+        .message.assistant { background: #16213e; border: 1px solid #0f3460; }
+        .message pre { background: #0a0a15; padding: 10px; border-radius: 6px; overflow-x: auto; margin-top: 8px; font-size: 0.85rem; }
+        .input-area { padding: 20px; background: #16213e; border-top: 1px solid #0f3460; display: flex; gap: 10px; }
+        .input-area input { flex: 1; padding: 14px; background: #0f3460; border: 1px solid #1a4080; border-radius: 8px; color: #eee; font-size: 1rem; }
+        .input-area input:focus { outline: none; border-color: #e94560; }
+        .input-area button { padding: 14px 28px; background: #e94560; border: none; border-radius: 8px; color: white; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+        .input-area button:hover { background: #ff6b6b; }
+        .input-area button:disabled { background: #666; cursor: not-allowed; }
+        .loading { display: inline-block; width: 20px; height: 20px; border: 2px solid #666; border-top-color: #e94560; border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .status { font-size: 0.8rem; color: #666; margin-top: 10px; }
+        .status.connected { color: #4ade80; }
+        .status.error { color: #f87171; }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <h2>🔥 ForgeLens Agents</h2>
+        <button class="agent-btn active" data-endpoint="/api/agents/forgelens/chat">
+            <span class="name">Orchestrator</span>
+            <span class="desc">Full workflow automation</span>
+        </button>
+        <button class="agent-btn" data-endpoint="/api/agents/trend/chat">
+            <span class="name">Trend Analyzer</span>
+            <span class="desc">News & trends</span>
+        </button>
+        <button class="agent-btn" data-endpoint="/api/agents/image/chat">
+            <span class="name">Image Generator</span>
+            <span class="desc">DALL-E memes</span>
+        </button>
+        <button class="agent-btn" data-endpoint="/api/agents/social/chat">
+            <span class="name">Social Media</span>
+            <span class="desc">Compliance & posting</span>
+        </button>
+        <hr style="border-color: #0f3460; margin: 20px 0;">
+        <button class="agent-btn" data-endpoint="/api/workflow/run" data-workflow="true">
+            <span class="name">Run Workflow</span>
+            <span class="desc">End-to-end automation</span>
+        </button>
+        <div class="status" id="status">Checking connection...</div>
+    </div>
+    <div class="main">
+        <div class="header">
+            <h1 id="agent-title">ForgeLens Orchestrator</h1>
+        </div>
+        <div class="chat-container" id="chat"></div>
+        <div class="input-area">
+            <input type="text" id="input" placeholder="Type your message..." autofocus>
+            <button id="send">Send</button>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+        let currentEndpoint = '/api/agents/forgelens/chat';
+        let isWorkflow = false;
+
+        // Elements
+        const chat = document.getElementById('chat');
+        const input = document.getElementById('input');
+        const sendBtn = document.getElementById('send');
+        const status = document.getElementById('status');
+        const agentTitle = document.getElementById('agent-title');
+        const agentBtns = document.querySelectorAll('.agent-btn');
+
+        // Check API health
+        async function checkHealth() {
+            try {
+                const res = await fetch(`${API_BASE}/health`);
+                if (res.ok) {
+                    status.textContent = '● Connected';
+                    status.className = 'status connected';
+                } else {
+                    throw new Error('Not healthy');
+                }
+            } catch {
+                status.textContent = '● Disconnected';
+                status.className = 'status error';
+            }
+        }
+
+        // Add message to chat
+        function addMessage(content, role) {
+            const div = document.createElement('div');
+            div.className = `message ${role}`;
+            
+            // Format code blocks
+            const formatted = content.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+            div.innerHTML = formatted.replace(/\n/g, '<br>');
+            
+            chat.appendChild(div);
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        // Send message
+        async function sendMessage() {
+            const message = input.value.trim();
+            if (!message) return;
+
+            addMessage(message, 'user');
+            input.value = '';
+            sendBtn.disabled = true;
+            sendBtn.innerHTML = '<span class="loading"></span>';
+
+            try {
+                const body = isWorkflow 
+                    ? { category: message, dryRun: true }
+                    : { message };
+
+                const res = await fetch(`${API_BASE}${currentEndpoint}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+
+                const data = await res.json();
+                const response = data.response || data.result || JSON.stringify(data, null, 2);
+                addMessage(response, 'assistant');
+            } catch (err) {
+                addMessage(`Error: ${err.message}`, 'assistant');
+            } finally {
+                sendBtn.disabled = false;
+                sendBtn.textContent = 'Send';
+            }
+        }
+
+        // Agent selection
+        agentBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                agentBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentEndpoint = btn.dataset.endpoint;
+                isWorkflow = btn.dataset.workflow === 'true';
+                agentTitle.textContent = btn.querySelector('.name').textContent;
+                input.placeholder = isWorkflow ? 'Enter category (e.g., technology, sports)...' : 'Type your message...';
+            });
+        });
+
+        // Event listeners
+        sendBtn.addEventListener('click', sendMessage);
+        input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        // Initial health check
+        checkHealth();
+        setInterval(checkHealth, 10000);
+    </script>
+</body>
+</html>
