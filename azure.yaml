@@ -1,0 +1,38 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+
+name: forgelens
+metadata:
+  template: forgelens@0.0.1
+
+services:
+  api:
+    project: ./src/ForgeLens.Api
+    host: containerapp
+    language: dotnet
+    docker:
+      path: ./Dockerfile
+      context: .
+
+hooks:
+  preprovision:
+    shell: sh
+    run: |
+      echo "Preparing ForgeLens deployment..."
+
+  postprovision:
+    shell: sh
+    run: |
+      echo "ForgeLens deployed successfully!"
+      echo ""
+      echo "API URL: ${SERVICE_API_URI}"
+      echo ""
+      echo "Swagger UI: ${SERVICE_API_URI}"
+      echo ""
+      echo "To run the workflow:"
+      echo "  curl -X POST ${SERVICE_API_URI}/api/workflow/run \\"
+      echo "    -H 'Content-Type: application/json' \\"
+      echo "    -d '{\"category\": \"technology\", \"dryRun\": true}'"
+
+infra:
+  provider: bicep
+  path: ./infra
