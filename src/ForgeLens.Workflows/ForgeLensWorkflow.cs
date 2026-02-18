@@ -1,4 +1,4 @@
-using ForgeLens.Agents.Definitions;
+using ForgeLens.Agents;
 using ForgeLens.Workflows.Models;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.Logging;
@@ -10,21 +10,21 @@ namespace ForgeLens.Workflows;
 /// </summary>
 public class ForgeLensWorkflow
 {
-    private readonly AgentFactory _agentFactory;
     private readonly ILogger<ForgeLensWorkflow> _logger;
-    private readonly AIAgent _trendAgent;
-    private readonly AIAgent _imageAgent;
-    private readonly AIAgent _socialAgent;
+    private readonly TrendAnalyzerAgent _trendAgent;
+    private readonly ImageGeneratorAgent _imageAgent;
+    private readonly SocialMediaAgent _socialAgent;
 
-    public ForgeLensWorkflow(AgentFactory agentFactory, ILogger<ForgeLensWorkflow> logger)
+    public ForgeLensWorkflow(
+        TrendAnalyzerAgent trendAgent,
+        ImageGeneratorAgent imageAgent,
+        SocialMediaAgent socialAgent,
+        ILogger<ForgeLensWorkflow> logger)
     {
-        _agentFactory = agentFactory;
+        _trendAgent = trendAgent;
+        _imageAgent = imageAgent;
+        _socialAgent = socialAgent;
         _logger = logger;
-        
-        // Create agents
-        _trendAgent = _agentFactory.CreateTrendAnalyzerAgent();
-        _imageAgent = _agentFactory.CreateImageGeneratorAgent();
-        _socialAgent = _agentFactory.CreateSocialMediaAgent();
     }
 
     /// <summary>

@@ -1,6 +1,12 @@
+using Azure.AI.OpenAI;
+using Azure.Identity;
 using DotNetEnv;
-using ForgeLens.Agents.Definitions;
+using ForgeLens.Agents;
+using ForgeLens.Tools.Image;
+using ForgeLens.Tools.News;
+using ForgeLens.Tools.Social;
 using ForgeLens.Workflows;
+using Microsoft.Extensions.AI;
 using Microsoft.OpenApi.Models;
 
 // Load environment variables - check multiple possible locations
@@ -34,30 +40,80 @@ var config = new ForgeLensApiConfig
     GptDeployment = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT") ?? "gpt-4o",
     DalleDeployment = Environment.GetEnvironmentVariable("AZURE_OPENAI_DALLE_DEPLOYMENT") ?? "dall-e-3",
     OutputDirectory = Environment.GetEnvironmentVariable("OUTPUT_DIRECTORY") ?? "./artifacts/images",
+    // News APIs (India-focused)
     NewsApiKey = Environment.GetEnvironmentVariable("NEWS_API_KEY"),
     GNewsApiKey = Environment.GetEnvironmentVariable("GNEWS_API_KEY"),
     NewsDataApiKey = Environment.GetEnvironmentVariable("NEWSDATA_API_KEY"),
+    MediaStackApiKey = Environment.GetEnvironmentVariable("MEDIASTACK_API_KEY"),
+    CurrentsApiKey = Environment.GetEnvironmentVariable("CURRENTS_API_KEY"),
+    TheNewsApiKey = Environment.GetEnvironmentVariable("THENEWSAPI_KEY"),
+    Country = Environment.GetEnvironmentVariable("NEWS_COUNTRY") ?? "in",
     InstagramUsername = Environment.GetEnvironmentVariable("INSTAGRAM_USERNAME"),
     InstagramPassword = Environment.GetEnvironmentVariable("INSTAGRAM_PASSWORD")
 };
 
 builder.Services.AddSingleton(config);
 
-// Register agent factory
-builder.Services.AddSingleton<AgentFactory>(sp =>
+// Create output directory
+Directory.CreateDirectory(config.OutputDirectory);
+
+// Register IChatClient (shared by all agents)
+builder.Services.AddSingleton<IChatClient>(sp =>
 {
     var cfg = sp.GetRequiredService<ForgeLensApiConfig>();
-    return new AgentFactory(
-        cfg.AzureOpenAIEndpoint,
-        cfg.GptDeployment,
-        cfg.DalleDeployment,
-        cfg.OutputDirectory,
-        cfg.NewsApiKey,
-        cfg.GNewsApiKey,
-        cfg.NewsDataApiKey,
-        cfg.InstagramUsername,
-        cfg.InstagramPassword);
+    return AzureOpenAIChatClientFactory.Create(cfg.AzureOpenAIEndpoint, cfg.GptDeployment);
 });
+
+// Register AzureOpenAIClient for DALL-E
+builder.Services.AddSingleton<AzureOpenAIClient>(sp =>
+{
+    var cfg = sp.GetRequiredService<ForgeLensApiConfig>();
+    return new AzureOpenAIClient(new Uri(cfg.AzureOpenAIEndpoint), new DefaultAzureCredential());
+});
+
+// Register Tools
+builder.Services.AddSingleton<NewsTools>(sp =>
+{
+    var cfg = sp.GetRequiredService<ForgeLensApiConfig>();
+    return new NewsTools(
+        new HttpClient(),
+        cfg.NewsApiKey, cfg.GNewsApiKey, cfg.NewsDataApiKey,
+        cfg.MediaStackApiKey, cfg.CurrentsApiKey, cfg.TheNewsApiKey,
+        cfg.Country);
+});
+
+builder.Services.AddSingleton<ImageTools>(sp =>
+{
+    var cfg = sp.GetRequiredService<ForgeLensApiConfig>();
+    var client = sp.GetRequiredService<AzureOpenAIClient>();
+    return new ImageTools(client, cfg.DalleDeployment, cfg.OutputDirectory);
+});
+
+builder.Services.AddSingleton<ImageEvaluationTools>(sp =>
+{
+    var cfg = sp.GetRequiredService<ForgeLensApiConfig>();
+    var client = sp.GetRequiredService<AzureOpenAIClient>();
+    return new ImageEvaluationTools(client, cfg.GptDeployment);
+});
+
+builder.Services.AddSingleton<SocialMediaTools>(sp =>
+{
+    var cfg = sp.GetRequiredService<ForgeLensApiConfig>();
+    var client = sp.GetRequiredService<AzureOpenAIClient>();
+    return new SocialMediaTools(client, cfg.GptDeployment);
+});
+
+builder.Services.AddSingleton<InstagramPostingTools>(sp =>
+{
+    var cfg = sp.GetRequiredService<ForgeLensApiConfig>();
+    return new InstagramPostingTools(cfg.InstagramUsername ?? "", cfg.InstagramPassword ?? "");
+});
+
+// Register Agents
+builder.Services.AddSingleton<TrendAnalyzerAgent>();
+builder.Services.AddSingleton<ImageGeneratorAgent>();
+builder.Services.AddSingleton<SocialMediaAgent>();
+builder.Services.AddSingleton<ForgeLensOrchestratorAgent>();
 
 // Register workflow
 builder.Services.AddScoped<ForgeLensWorkflow>();
@@ -102,9 +158,8 @@ app.MapGet("/health", () => Results.Ok(new { status = "healthy", timestamp = Dat
 // ============================================
 
 // Main ForgeLens Agent Chat
-app.MapPost("/api/agents/forgelens/chat", async (ChatRequest request, AgentFactory factory) =>
+app.MapPost("/api/agents/forgelens/chat", async (ChatRequest request, ForgeLensOrchestratorAgent agent) =>
 {
-    var agent = factory.CreateForgeLensAgent();
     var response = await agent.RunAsync(request.Message);
     var responseText = response.Messages?.LastOrDefault()?.Text ?? response.ToString() ?? "";
     return Results.Ok(new ChatResponse { Response = responseText, Agent = "ForgeLens" });
@@ -118,9 +173,8 @@ app.MapPost("/api/agents/forgelens/chat", async (ChatRequest request, AgentFacto
 });
 
 // Trend Analyzer Agent Chat
-app.MapPost("/api/agents/trend/chat", async (ChatRequest request, AgentFactory factory) =>
+app.MapPost("/api/agents/trend/chat", async (ChatRequest request, TrendAnalyzerAgent agent) =>
 {
-    var agent = factory.CreateTrendAnalyzerAgent();
     var response = await agent.RunAsync(request.Message);
     var responseText = response.Messages?.LastOrDefault()?.Text ?? response.ToString() ?? "";
     return Results.Ok(new ChatResponse { Response = responseText, Agent = "TrendAnalyzer" });
@@ -134,9 +188,8 @@ app.MapPost("/api/agents/trend/chat", async (ChatRequest request, AgentFactory f
 });
 
 // Image Generator Agent Chat
-app.MapPost("/api/agents/image/chat", async (ChatRequest request, AgentFactory factory) =>
+app.MapPost("/api/agents/image/chat", async (ChatRequest request, ImageGeneratorAgent agent) =>
 {
-    var agent = factory.CreateImageGeneratorAgent();
     var response = await agent.RunAsync(request.Message);
     var responseText = response.Messages?.LastOrDefault()?.Text ?? response.ToString() ?? "";
     return Results.Ok(new ChatResponse { Response = responseText, Agent = "ImageGenerator" });
@@ -150,9 +203,8 @@ app.MapPost("/api/agents/image/chat", async (ChatRequest request, AgentFactory f
 });
 
 // Social Media Agent Chat
-app.MapPost("/api/agents/social/chat", async (ChatRequest request, AgentFactory factory) =>
+app.MapPost("/api/agents/social/chat", async (ChatRequest request, SocialMediaAgent agent) =>
 {
-    var agent = factory.CreateSocialMediaAgent();
     var response = await agent.RunAsync(request.Message);
     var responseText = response.Messages?.LastOrDefault()?.Text ?? response.ToString() ?? "";
     return Results.Ok(new ChatResponse { Response = responseText, Agent = "SocialMediaAgent" });
@@ -170,10 +222,15 @@ app.MapPost("/api/agents/social/chat", async (ChatRequest request, AgentFactory 
 // ============================================
 
 // Run full workflow
-app.MapPost("/api/workflow/run", async (WorkflowRequest request, AgentFactory factory, ILoggerFactory loggerFactory) =>
+app.MapPost("/api/workflow/run", async (
+    WorkflowRequest request, 
+    TrendAnalyzerAgent trendAgent,
+    ImageGeneratorAgent imageAgent,
+    SocialMediaAgent socialAgent,
+    ILoggerFactory loggerFactory) =>
 {
     var logger = loggerFactory.CreateLogger<ForgeLensWorkflow>();
-    var workflow = new ForgeLensWorkflow(factory, logger);
+    var workflow = new ForgeLensWorkflow(trendAgent, imageAgent, socialAgent, logger);
     
     var result = await workflow.ExecuteAsync(
         category: request.Category ?? "technology",
@@ -265,9 +322,14 @@ public class ForgeLensApiConfig
     public string GptDeployment { get; set; } = "gpt-4o";
     public string DalleDeployment { get; set; } = "dall-e-3";
     public string OutputDirectory { get; set; } = "./artifacts/images";
-    public string? NewsApiKey { get; set; }
-    public string? GNewsApiKey { get; set; }
-    public string? NewsDataApiKey { get; set; }
+    // News API keys (all have free tiers)
+    public string? NewsApiKey { get; set; }       // 100 req/day
+    public string? GNewsApiKey { get; set; }      // 100 req/day
+    public string? NewsDataApiKey { get; set; }   // 200 req/day (India-based!)
+    public string? MediaStackApiKey { get; set; } // 100 req/month
+    public string? CurrentsApiKey { get; set; }   // 600 req/month
+    public string? TheNewsApiKey { get; set; }    // 100 req/day
+    public string Country { get; set; } = "in";  // Default to India
     public string? InstagramUsername { get; set; }
     public string? InstagramPassword { get; set; }
 }
