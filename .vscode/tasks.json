@@ -19,7 +19,7 @@
             "type": "process",
             "args": [
                 "publish",
-                "${workspaceFolder}/src/ForgeLens.App/ForgeLens.App.csproj",
+                "${workspaceFolder}/src/ForgeLens.Api/ForgeLens.Api.csproj",
                 "-c",
                 "Release",
                 "-o",

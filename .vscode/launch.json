@@ -2,45 +2,18 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "ForgeLens (Full)",
+            "name": "ForgeLens API",
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": "build",
-            "program": "${workspaceFolder}/src/ForgeLens.App/bin/Debug/net8.0/ForgeLens.App.dll",
+            "program": "${workspaceFolder}/src/ForgeLens.Api/bin/Debug/net8.0/ForgeLens.Api.dll",
             "args": [],
             "cwd": "${workspaceFolder}",
             "stopAtEntry": false,
             "console": "integratedTerminal",
             "env": {
-                "DOTNET_ENVIRONMENT": "Development"
-            }
-        },
-        {
-            "name": "ForgeLens (Trends Only)",
-            "type": "coreclr",
-            "request": "launch",
-            "preLaunchTask": "build",
-            "program": "${workspaceFolder}/src/ForgeLens.App/bin/Debug/net8.0/ForgeLens.App.dll",
-            "args": ["--trends-only"],
-            "cwd": "${workspaceFolder}",
-            "stopAtEntry": false,
-            "console": "integratedTerminal",
-            "env": {
-                "DOTNET_ENVIRONMENT": "Development"
-            }
-        },
-        {
-            "name": "ForgeLens (Dry Run)",
-            "type": "coreclr",
-            "request": "launch",
-            "preLaunchTask": "build",
-            "program": "${workspaceFolder}/src/ForgeLens.App/bin/Debug/net8.0/ForgeLens.App.dll",
-            "args": ["--dry-run"],
-            "cwd": "${workspaceFolder}",
-            "stopAtEntry": false,
-            "console": "integratedTerminal",
-            "env": {
-                "DOTNET_ENVIRONMENT": "Development"
+                "ASPNETCORE_ENVIRONMENT": "Development",
+                "ASPNETCORE_URLS": "http://localhost:5000"
             }
         }
     ]

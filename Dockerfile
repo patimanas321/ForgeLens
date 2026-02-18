@@ -9,8 +9,6 @@ COPY src/ForgeLens.Tools/ForgeLens.Tools.csproj src/ForgeLens.Tools/
 COPY src/ForgeLens.Agents/ForgeLens.Agents.csproj src/ForgeLens.Agents/
 COPY src/ForgeLens.Workflows/ForgeLens.Workflows.csproj src/ForgeLens.Workflows/
 COPY src/ForgeLens.Api/ForgeLens.Api.csproj src/ForgeLens.Api/
-COPY src/ForgeLens.Infrastructure/ForgeLens.Infrastructure.csproj src/ForgeLens.Infrastructure/
-COPY src/ForgeLens.App/ForgeLens.App.csproj src/ForgeLens.App/
 
 # Restore dependencies
 RUN dotnet restore src/ForgeLens.Api/ForgeLens.Api.csproj

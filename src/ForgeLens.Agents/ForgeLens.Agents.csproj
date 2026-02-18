@@ -20,7 +20,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ForgeLens.Core\ForgeLens.Core.csproj" />
-    <ProjectReference Include="..\ForgeLens.Infrastructure\ForgeLens.Infrastructure.csproj" />
     <ProjectReference Include="..\ForgeLens.Tools\ForgeLens.Tools.csproj" />
   </ItemGroup>
 
