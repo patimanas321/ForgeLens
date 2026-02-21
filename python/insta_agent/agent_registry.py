@@ -1,0 +1,132 @@
+"""
+Agent Registry — Single source of truth for all agent identities and routing metadata.
+
+Every agent in the system is registered here. The orchestrator reads this to build
+`as_tool()` wrappers, and each BaseAgent reads it for its own ChatAgent identity.
+"""
+
+from dataclasses import dataclass, field
+from enum import Enum
+
+
+class Agent(str, Enum):
+    """Canonical agent identifiers — used as ChatAgent.id values."""
+    ORCHESTRATOR = "orchestrator"
+    TREND_SCOUT = "trend-scout"
+    CONTENT_STRATEGIST = "content-strategist"
+    MEDIA_GENERATOR = "media-generator"
+    COPYWRITER = "copywriter"
+    REVIEW_QUEUE = "review-queue"
+    PUBLISHER = "publisher"
+
+
+@dataclass(frozen=True)
+class AgentEntry:
+    """Metadata for a single agent."""
+    name: str
+    description: str
+    tool_name: str = ""
+    arg_name: str = field(default="request")
+    arg_description: str = ""
+
+
+AGENT_REGISTRY: dict[Agent, AgentEntry] = {
+    # ---- Orchestrator (no tool_name — it IS the top-level agent) ----
+    Agent.ORCHESTRATOR: AgentEntry(
+        name="Orchestrator",
+        description=(
+            "Main coordinator that runs the daily Instagram workflow: "
+            "discover trends → plan content → generate media → write copy → "
+            "queue for human review → publish upon approval → track analytics."
+        ),
+    ),
+
+    # ---- Trend Scout ----
+    Agent.TREND_SCOUT: AgentEntry(
+        name="Trend Scout",
+        description=(
+            "Searches the web for viral trends, trending hashtags, competitor content, "
+            "and emerging topics relevant to the Instagram account's niche."
+        ),
+        tool_name="call_trend_scout",
+        arg_description=(
+            "What to search for — e.g. 'trending topics in tech this week', "
+            "'competitor analysis for @account', 'viral reels in fitness niche'."
+        ),
+    ),
+
+    # ---- Content Strategist ----
+    Agent.CONTENT_STRATEGIST: AgentEntry(
+        name="Content Strategist",
+        description=(
+            "Plans the content calendar, selects the best topic from trends, "
+            "avoids repetition by checking posting history, and decides the "
+            "content format (image post, carousel, reel, story)."
+        ),
+        tool_name="call_content_strategist",
+        arg_description=(
+            "Trend data and context to plan content from — e.g. "
+            "'Here are today's top 5 trends: ... Pick the best one for our "
+            "fitness account and suggest a format.'"
+        ),
+    ),
+
+    # ---- Media Generator ----
+    Agent.MEDIA_GENERATOR: AgentEntry(
+        name="Media Generator",
+        description=(
+            "Generates images and videos for Instagram posts using AI models "
+            "(DALL-E for images, video generation APIs for reels). "
+            "Returns URLs to the generated media files."
+        ),
+        tool_name="call_media_generator",
+        arg_description=(
+            "A detailed creative brief describing the visual content to generate — "
+            "e.g. 'Create a vibrant fitness motivation image showing a sunrise "
+            "workout scene, modern flat illustration style, 1080x1080.'"
+        ),
+    ),
+
+    # ---- Copywriter ----
+    Agent.COPYWRITER: AgentEntry(
+        name="Copywriter",
+        description=(
+            "Writes engaging Instagram captions, selects relevant hashtags, "
+            "crafts calls-to-action, and maintains consistent brand voice."
+        ),
+        tool_name="call_copywriter",
+        arg_description=(
+            "Context for writing the caption — topic, target audience, tone, "
+            "media description, and any specific hashtags to include."
+        ),
+    ),
+
+    # ---- Review Queue (Human-in-the-Loop) ----
+    Agent.REVIEW_QUEUE: AgentEntry(
+        name="Review Queue",
+        description=(
+            "Manages the human-in-the-loop approval workflow. Queues content "
+            "for review, checks approval status, and handles edits or rejections."
+        ),
+        tool_name="call_review_queue",
+        arg_description=(
+            "The action to perform — e.g. 'Queue this post for review: ...', "
+            "'Check status of post ID abc123', 'Get all pending reviews'."
+        ),
+    ),
+
+    # ---- Publisher ----
+    Agent.PUBLISHER: AgentEntry(
+        name="Publisher",
+        description=(
+            "Posts approved content to Instagram via the Graph API. "
+            "Handles image posts, carousels, and reels. Respects optimal "
+            "posting times based on audience analytics."
+        ),
+        tool_name="call_publisher",
+        arg_description=(
+            "The approved content to publish — must include media URL, caption, "
+            "and posting preferences (e.g. 'Post immediately' or 'Schedule for 6pm')."
+        ),
+    ),
+}
