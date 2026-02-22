@@ -17,6 +17,8 @@ import os
 from azure.identity import DefaultAzureCredential
 from azure.keyvault.secrets import SecretClient
 
+from shared.config.settings import settings
+
 logger = logging.getLogger(__name__)
 
 # Key Vault URL — set in .env or environment
@@ -53,7 +55,7 @@ class KeyVaultStore:
             return
 
         try:
-            credential = DefaultAzureCredential()
+            credential = DefaultAzureCredential(managed_identity_client_id=settings.AZURE_CLIENT_ID)
             client = SecretClient(vault_url=_VAULT_URL, credential=credential)
 
             # Load known secrets

@@ -16,7 +16,6 @@ from datetime import datetime, timezone
 from azure.identity.aio import DefaultAzureCredential
 from azure.servicebus import ServiceBusMessage
 from azure.servicebus.aio import ServiceBusClient
-from azure.servicebus.aio.management import ServiceBusAdministrationClient
 
 from shared.config.settings import settings
 from shared.services.media_metadata_service import (
@@ -37,38 +36,6 @@ class ReviewStatus:
     APPROVED = "approved"
     REJECTED = "rejected"
     EDIT_REQUESTED = "edit_requested"
-
-
-# ---------------------------------------------------------------------------
-# Startup — ensure queues exist
-# ---------------------------------------------------------------------------
-
-async def ensure_servicebus_queues() -> None:
-    """Create the Service Bus queues if they don't already exist."""
-    ns = settings.SERVICEBUS_NAMESPACE
-    if not ns:
-        logger.warning("SERVICEBUS_NAMESPACE not set — review queue will not work")
-        return
-
-    credential = DefaultAzureCredential(managed_identity_client_id=settings.AZURE_CLIENT_ID)
-    try:
-        admin = ServiceBusAdministrationClient(
-            fully_qualified_namespace=ns, credential=credential
-        )
-        async with admin:
-            for queue_name in (QUEUE_PENDING, QUEUE_APPROVED):
-                try:
-                    await admin.get_queue(queue_name)
-                    logger.info(f"[Service Bus] Queue '{queue_name}' exists")
-                except Exception:
-                    await admin.create_queue(
-                        queue_name,
-                        max_delivery_count=10,
-                        default_message_time_to_live="P7D",  # 7 days TTL
-                    )
-                    logger.info(f"[Service Bus] Created queue '{queue_name}'")
-    finally:
-        await credential.close()
 
 
 # ---------------------------------------------------------------------------

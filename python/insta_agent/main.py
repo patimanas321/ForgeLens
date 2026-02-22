@@ -11,7 +11,6 @@ Usage:
 """
 
 import os
-import asyncio
 import logging
 import webbrowser
 import threading
@@ -43,8 +42,6 @@ from agents.insta_post_generator.agent import InstaPostGeneratorAgent
 from agents.approver.agent import ReviewQueueAgent
 from agents.communicator.agent import CommunicatorAgent
 from agents.publisher.agent import PublisherAgent
-from shared.services.media_metadata_service import ensure_cosmos_resources
-from shared.services.review_queue_service import ensure_servicebus_queues
 from shared.services.communicator_trigger_service import start_communicator_queue_trigger_worker
 from shared.services.publisher_trigger_service import start_publisher_queue_trigger_worker
 
@@ -60,23 +57,6 @@ def main():
     logger.info("Starting ForgeLens...")
     is_cloud = bool(os.environ.get("WEBSITE_INSTANCE_ID"))
     host = os.environ.get("APP_HOST", "0.0.0.0" if is_cloud else "127.0.0.1")
-
-    # --- Ensure Cosmos DB database + container exist ---
-    if settings.COSMOS_ENDPOINT:
-        asyncio.run(ensure_cosmos_resources())
-        from shared.services import media_metadata_service
-        media_metadata_service._client = None
-        media_metadata_service._credential = None
-        logger.info("Cosmos DB resources verified")
-    else:
-        logger.warning("COSMOS_ENDPOINT not set — media metadata will NOT be persisted")
-
-    # --- Ensure Service Bus queues exist ---
-    if settings.SERVICEBUS_NAMESPACE:
-        asyncio.run(ensure_servicebus_queues())
-        logger.info("Service Bus queues verified")
-    else:
-        logger.warning("SERVICEBUS_NAMESPACE not set — review queue will not work")
 
     # --- Azure OpenAI client ---
     credential = DefaultAzureCredential(managed_identity_client_id=settings.AZURE_CLIENT_ID)

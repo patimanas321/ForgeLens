@@ -12,7 +12,6 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from azure.cosmos import PartitionKey
 from azure.cosmos.aio import CosmosClient
 from azure.identity.aio import DefaultAzureCredential
 
@@ -41,53 +40,6 @@ async def _get_container():
     db = _client.get_database_client(settings.COSMOS_DATABASE)
     container = db.get_container_client(settings.COSMOS_CONTAINER)
     return container
-
-
-async def ensure_cosmos_resources() -> None:
-    """Verify (or create) the Cosmos DB database and container.
-
-    Call once at startup (e.g. from main.py).  If the database/container
-    already exist (created via ARM / az CLI) this is a cheap no-op.
-    If AAD data-plane RBAC isn't enabled for create operations the
-    function catches the 403 and logs a warning instead of crashing.
-    """
-    global _client, _credential
-
-    if _client is None:
-        _credential = DefaultAzureCredential(managed_identity_client_id=settings.AZURE_CLIENT_ID)
-        _client = CosmosClient(
-            url=settings.COSMOS_ENDPOINT,
-            credential=_credential,
-        )
-
-    try:
-        # Try create — works when data-plane RBAC is fully enabled
-        db = await _client.create_database_if_not_exists(id=settings.COSMOS_DATABASE)
-        await db.create_container_if_not_exists(
-            id=settings.COSMOS_CONTAINER,
-            partition_key=PartitionKey(path="/media_type"),
-        )
-        logger.info(
-            f"[cosmos] Ensured database='{settings.COSMOS_DATABASE}' "
-            f"container='{settings.COSMOS_CONTAINER}'"
-        )
-    except Exception as e:
-        # 403 = AAD token can't create resources on data plane.
-        # The db/container were likely pre-created via ARM (az CLI).
-        # Verify we can at least read the container.
-        try:
-            db = _client.get_database_client(settings.COSMOS_DATABASE)
-            container = db.get_container_client(settings.COSMOS_CONTAINER)
-            await container.read()
-            logger.info(
-                f"[cosmos] Database/container exist (pre-created via ARM). "
-                f"Data-plane create blocked: {e}"
-            )
-        except Exception as verify_err:
-            logger.error(
-                f"[cosmos] Cannot reach database/container: {verify_err}. "
-                f"Media metadata will NOT be persisted."
-            )
 
 
 # ---------------------------------------------------------------------------

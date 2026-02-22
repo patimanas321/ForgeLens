@@ -11,15 +11,8 @@ from shared.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
-# Get API key directly from KV-backed settings (falls back to env var / MCP URL)
-_api_key = settings.TAVILY_API_KEY
-if not _api_key:
-    # Legacy fallback: parse from MCP URL
-    from urllib.parse import parse_qs, urlparse
-    _parsed = urlparse(settings.TAVILY_MCP_URL)
-    _api_key = parse_qs(_parsed.query).get("tavilyApiKey", [""])[0]
-
-_client = AsyncTavilyClient(api_key=_api_key)
+# Create Tavily client with API key from Key Vault
+client = AsyncTavilyClient(api_key=settings.TAVILY_API_KEY)
 
 
 # ------------------------------------------------------------------
@@ -44,7 +37,7 @@ async def tavily_search(query: str, max_results: int = 5, search_depth: str = "b
     """Search the web using Tavily and return structured results."""
     logger.info("[SEARCH] query=%r max_results=%d depth=%s", query, max_results, search_depth)
     try:
-        result = await _client.search(
+        result = await client.search(
             query=query,
             max_results=max_results,
             search_depth=search_depth,
@@ -74,7 +67,7 @@ async def tavily_extract(url: str) -> str:
     """Extract clean content from a URL using Tavily."""
     logger.info("[EXTRACT] url=%r", url)
     try:
-        result = await _client.extract(urls=[url])
+        result = await client.extract(urls=[url])
         pages = result.get("results", [])
         if pages:
             page = pages[0]
