@@ -89,16 +89,16 @@ def main():
         api_version=settings.AZURE_OPENAI_API_VERSION,
     )
 
-    # --- Create specialist agents (shared across all accounts) ---
-    specialist_agents = [
-        TrendScoutAgent(ai_client),
-        ContentStrategistAgent(ai_client),
-        MediaGeneratorAgent(ai_client),
-        CopywriterAgent(ai_client),
-        ReviewQueueAgent(ai_client),
-        PublisherAgent(ai_client),
-    ]
-    logger.info(f"Created {len(specialist_agents)} specialist agent(s)")
+    # --- Create delegable specialist agents (shared across all accounts) ---
+    trend_scout_agent = TrendScoutAgent(ai_client)
+    content_strategist_agent = ContentStrategistAgent(ai_client)
+    media_generator_agent = MediaGeneratorAgent(ai_client)
+    copywriter_agent = CopywriterAgent(ai_client)
+    review_queue_agent = ReviewQueueAgent(ai_client)
+    logger.info("Created 5 specialist agent(s)")
+
+    # Publisher is standalone: queue listener + content_id publisher
+    publisher_agent = PublisherAgent(ai_client)
 
     # --- Discover account profiles and create one agent per account ---
     profiles = load_all_profiles()
@@ -111,12 +111,26 @@ def main():
 
     for name, profile in profiles.items():
         # Account agent — conversational persona with specialist tools
-        agent = InstaAccountAgent(ai_client, profile, child_agents=specialist_agents)
+        agent = InstaAccountAgent(
+            ai_client,
+            profile,
+            child_agents=[
+                trend_scout_agent,
+                content_strategist_agent,
+                media_generator_agent,
+                copywriter_agent,
+                review_queue_agent,
+            ],
+        )
         account_agents.append(agent)
 
         # Content pipeline — MAF sequential workflow with HIL before publishing
         pipeline = build_content_pipeline(
-            specialist_agents,
+            trend_scout=trend_scout_agent,
+            content_strategist=content_strategist_agent,
+            media_generator=media_generator_agent,
+            copywriter=copywriter_agent,
+            review_queue=review_queue_agent,
             account_name=profile.account_name,
             display_name=profile.display_name,
         )
@@ -129,7 +143,14 @@ def main():
     all_entities = (
         [a.agent for a in account_agents]   # Account persona agents
         + pipeline_agents                    # Content pipeline workflows
-        + [s.agent for s in specialist_agents]  # Individual specialist agents
+        + [
+            trend_scout_agent.agent,
+            content_strategist_agent.agent,
+            media_generator_agent.agent,
+            copywriter_agent.agent,
+            review_queue_agent.agent,
+        ]
+        + [publisher_agent.agent]            # Standalone publisher agent
     )
     server = DevServer(port=settings.PORT, host="127.0.0.1", ui_enabled=True)
     server.register_entities(all_entities)

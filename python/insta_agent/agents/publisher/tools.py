@@ -1,34 +1,46 @@
-"""
-Tools for the Publisher agent — posting content to Instagram via Graph API.
+"""Tools for the Publisher agent — publish by content ID only.
 
-Dry-run mode: when INSTAGRAM_ACCESS_TOKEN is empty, tools simulate the Instagram API
-and return mock responses so the full pipeline can be tested end-to-end.
+Publisher never accepts raw media URLs/captions directly. It either:
+  1) Pulls approved work from the queue, or
+  2) Publishes a specific approved ``content_id`` from Cosmos DB.
 """
 
 import asyncio
 import logging
-import uuid
-from datetime import datetime, timezone
 
 from agent_framework import FunctionTool
 from pydantic import BaseModel, Field
 
 from shared.config.settings import settings
 from shared.services.instagram_service import InstagramService
+from shared.services.media_metadata_service import (
+    get_content_by_id,
+    mark_content_published,
+    query_content,
+)
 from shared.services.review_queue_service import ReviewQueueService
 
 logger = logging.getLogger(__name__)
 
 _queue_service = ReviewQueueService()
 
-# Dry-run mode when Instagram credentials are missing
-DRY_RUN = not settings.INSTAGRAM_ACCESS_TOKEN
-if DRY_RUN:
-    logger.warning("[DRY-RUN] Instagram tokens not configured — Publisher runs in simulation mode")
+
+def _build_caption(record: dict) -> str:
+    caption = (record.get("caption") or "").strip()
+    hashtags = record.get("hashtags") or []
+    if isinstance(hashtags, str):
+        hashtags_text = hashtags.strip()
+    else:
+        hashtags_text = " ".join(h for h in hashtags if h)
+
+    if hashtags_text and not caption:
+        return hashtags_text
+    if hashtags_text and caption:
+        return f"{caption}\n\n{hashtags_text}"
+    return caption
 
 
 def _get_ig_service(account_name: str = "") -> InstagramService:
-    """Get an InstagramService for a specific account, or the default."""
     if account_name:
         accounts = settings.INSTAGRAM_ACCOUNTS
         account_id = accounts.get(account_name)
@@ -38,262 +50,288 @@ def _get_ig_service(account_name: str = "") -> InstagramService:
     return InstagramService()
 
 
-# ------------------------------------------------------------------
-# Input schemas
-# ------------------------------------------------------------------
-
 class ListInstagramAccountsInput(BaseModel):
-    pass  # No input needed
+    pass
 
 
-class PublishImagePostInput(BaseModel):
-    image_url: str = Field(..., description="Publicly accessible URL of the image to post.")
-    caption: str = Field(..., description="Full caption text including hashtags.")
-    account_name: str = Field(default="", description="Target IG account name (e.g. 'oreo'). Leave empty for default.")
+class GetPendingApprovalsInput(BaseModel):
+    limit: int = Field(default=50, ge=1, le=200)
 
 
-class PublishReelInput(BaseModel):
-    video_url: str = Field(..., description="Publicly accessible URL of the video.")
-    caption: str = Field(..., description="Full caption text including hashtags.")
-    account_name: str = Field(default="", description="Target IG account name. Leave empty for default.")
+class GetPendingToPublishInput(BaseModel):
+    limit: int = Field(default=50, ge=1, le=200)
 
 
-class PublishCarouselInput(BaseModel):
-    image_urls: list[str] = Field(..., description="List of publicly accessible image URLs (2-10 images).")
-    caption: str = Field(..., description="Full caption text including hashtags.")
-    account_name: str = Field(default="", description="Target IG account name. Leave empty for default.")
+class GetPublishHistoryInput(BaseModel):
+    limit: int = Field(default=50, ge=1, le=200)
 
 
-class CheckPublishStatusInput(BaseModel):
-    container_id: str = Field(..., description="The media container ID to check.")
+class GetContentByIdInput(BaseModel):
+    content_id: str = Field(..., description="Cosmos content ID (GUID/hex).")
 
 
-class GetApprovedItemsInput(BaseModel):
-    pass  # No input needed
+class PublishContentByIdInput(BaseModel):
+    content_id: str = Field(..., description="Cosmos content ID (GUID/hex).")
+    account_name: str = Field(
+        default="",
+        description="Optional override account name. Leave empty to use content record target/default account.",
+    )
 
 
-class MarkAsPublishedInput(BaseModel):
-    item_id: str = Field(..., description="Review queue item ID.")
-    media_id: str = Field(..., description="Instagram media ID after successful publish.")
+class PublishNextApprovedInput(BaseModel):
+    account_name: str = Field(
+        default="",
+        description="Optional override account name for the published item.",
+    )
 
 
-# ------------------------------------------------------------------
-# Tool functions
-# ------------------------------------------------------------------
-
-def _mock_id(prefix: str = "ig") -> str:
-    return f"{prefix}_{uuid.uuid4().hex[:12]}"
+class PublishAllPendingInput(BaseModel):
+    account_name: str = Field(
+        default="",
+        description="Optional override account name for all published items.",
+    )
+    limit: int = Field(
+        default=50,
+        ge=1,
+        le=200,
+        description="Maximum number of approved pending items to process in this batch.",
+    )
 
 
 async def list_instagram_accounts() -> dict:
-    """List all configured Instagram accounts available for publishing."""
     accounts = settings.INSTAGRAM_ACCOUNTS
     return {
-        "accounts": [
-            {"name": name, "account_id": aid}
-            for name, aid in accounts.items()
-        ],
+        "accounts": [{"name": name, "account_id": aid} for name, aid in accounts.items()],
         "default": next(iter(accounts), "") if accounts else "",
         "count": len(accounts),
     }
 
 
-async def get_approved_items() -> dict:
-    """Fetch all approved items from the review queue that are ready to publish."""
-    items = await _queue_service.get_approved_items()
-    return {
-        "count": len(items),
-        "items": items,
-    }
+async def get_pending_approvals(limit: int = 50) -> dict:
+    items = await query_content(approval_status="pending", limit=limit)
+    return {"count": len(items), "items": items}
 
 
-async def publish_image_post(image_url: str, caption: str, account_name: str = "") -> dict:
-    """Publish a single image post to Instagram (two-step: create container → publish)."""
-    if DRY_RUN:
-        mock_container = _mock_id("container")
-        mock_media = _mock_id("media")
-        logger.info(f"[DRY-RUN] Simulated image publish: {mock_media}")
-        return {
-            "status": "published (dry-run)",
-            "media_id": mock_media,
-            "container_id": mock_container,
-            "type": "image",
-            "dry_run": True,
-            "image_url": image_url,
-            "caption_preview": caption[:100],
-        }
-    try:
-        svc = _get_ig_service(account_name)
-        container_id = await svc.create_image_container(image_url, caption)
-        media_id = await svc.publish_container(container_id)
-        return {
-            "status": "published",
-            "media_id": media_id,
-            "container_id": container_id,
-            "type": "image",
-            "account": account_name or "default",
-        }
-    except Exception as e:
-        logger.error(f"[FAIL] Image publish failed: {e}")
-        return {"status": "error", "error": str(e), "type": "image"}
+async def get_pending_to_be_published(limit: int = 50) -> dict:
+    items = await query_content(
+        approval_status="approved",
+        publish_status="pending",
+        limit=limit,
+    )
+    return {"count": len(items), "items": items}
 
 
-async def publish_reel(video_url: str, caption: str, account_name: str = "") -> dict:
-    """Publish a reel/video to Instagram (create container → wait for processing → publish)."""
-    if DRY_RUN:
-        mock_container = _mock_id("container")
-        mock_media = _mock_id("media")
-        logger.info(f"[DRY-RUN] Simulated reel publish: {mock_media}")
-        return {
-            "status": "published (dry-run)",
-            "media_id": mock_media,
-            "container_id": mock_container,
-            "type": "reel",
-            "dry_run": True,
-            "video_url": video_url,
-            "caption_preview": caption[:100],
-        }
-    try:
-        svc = _get_ig_service(account_name)
-        container_id = await svc.create_video_container(video_url, caption)
+async def get_publish_history(limit: int = 50) -> dict:
+    items = await query_content(publish_status="published", limit=limit)
+    return {"count": len(items), "items": items}
 
-        # Wait for video processing (poll every 30s, max 5 min)
-        for attempt in range(10):
-            await asyncio.sleep(30)
-            status = await svc.check_container_status(container_id)
-            status_code = status.get("status_code", "")
-            logger.info(f"Reel processing status ({attempt + 1}/10): {status_code}")
 
-            if status_code == "FINISHED":
-                media_id = await svc.publish_container(container_id)
-                return {
-                    "status": "published",
-                    "media_id": media_id,
-                    "container_id": container_id,
-                    "type": "reel",
-                    "account": account_name or "default",
-                }
-            elif status_code == "ERROR":
-                return {
-                    "status": "error",
-                    "error": f"Video processing failed: {status}",
-                    "type": "reel",
-                }
+async def get_content_details(content_id: str) -> dict:
+    record = await get_content_by_id(content_id)
+    if not record:
+        return {"status": "error", "error": f"Content {content_id} not found"}
+    return {"status": "ok", "content": record}
 
+
+async def _publish_record(record: dict, account_name: str = "") -> dict:
+    content_id = record.get("id", "")
+    approval_status = record.get("approval_status", "pending")
+    if approval_status != "approved":
         return {
             "status": "error",
-            "error": "Video processing timed out after 5 minutes",
-            "container_id": container_id,
-            "type": "reel",
+            "error": f"Content {content_id} is not approved (status={approval_status})",
+            "content_id": content_id,
         }
-    except Exception as e:
-        logger.error(f"[FAIL] Reel publish failed: {e}")
-        return {"status": "error", "error": str(e), "type": "reel"}
 
-
-async def publish_carousel(image_urls: list[str], caption: str, account_name: str = "") -> dict:
-    """Publish a carousel post (multiple images) to Instagram."""
-    if DRY_RUN:
-        mock_container = _mock_id("container")
-        mock_media = _mock_id("media")
-        logger.info(f"[DRY-RUN] Simulated carousel publish: {mock_media} ({len(image_urls)} images)")
+    if record.get("publish_status") == "published":
         return {
-            "status": "published (dry-run)",
-            "media_id": mock_media,
-            "container_id": mock_container,
-            "children_count": len(image_urls),
-            "type": "carousel",
-            "dry_run": True,
-            "caption_preview": caption[:100],
+            "status": "ok",
+            "content_id": content_id,
+            "message": "Content already published",
+            "instagram_media_id": record.get("instagram_media_id", ""),
         }
+
+    media_type = record.get("media_type", "image")
+    post_type = record.get("post_type", "post")
+    media_url = record.get("blob_url", "")
+    caption_text = _build_caption(record)
+
+    if not media_url:
+        return {
+            "status": "error",
+            "error": f"Content {content_id} has no blob_url",
+            "content_id": content_id,
+        }
+
+    target_account_name = account_name or record.get("target_account_name", "")
+
     try:
-        svc = _get_ig_service(account_name)
-        # Step 1: Create child containers for each image
-        children_ids = []
-        for url in image_urls:
-            child_id = await svc.create_image_container(url, "")
-            children_ids.append(child_id)
+        svc = _get_ig_service(target_account_name)
 
-        # Step 2: Create carousel container
-        container_id = await svc.create_carousel_container(children_ids, caption)
+        if post_type == "carousel":
+            image_urls = record.get("blob_urls") or []
+            if not image_urls:
+                return {
+                    "status": "error",
+                    "error": "Carousel content requires blob_urls list",
+                    "content_id": content_id,
+                }
+            children_ids = []
+            for url in image_urls:
+                child_id = await svc.create_image_container(url, "")
+                children_ids.append(child_id)
+            container_id = await svc.create_carousel_container(children_ids, caption_text)
+            media_id = await svc.publish_container(container_id)
+        elif post_type == "reel" or media_type == "video":
+            container_id = await svc.create_video_container(media_url, caption_text)
+            for _ in range(10):
+                await asyncio.sleep(30)
+                status = await svc.check_container_status(container_id)
+                if status.get("status_code") == "FINISHED":
+                    break
+                if status.get("status_code") == "ERROR":
+                    return {
+                        "status": "error",
+                        "error": f"Video processing failed: {status}",
+                        "content_id": content_id,
+                    }
+            else:
+                return {
+                    "status": "error",
+                    "error": "Video processing timed out after 5 minutes",
+                    "content_id": content_id,
+                }
+            media_id = await svc.publish_container(container_id)
+        else:
+            container_id = await svc.create_image_container(media_url, caption_text)
+            media_id = await svc.publish_container(container_id)
 
-        # Step 3: Publish
-        media_id = await svc.publish_container(container_id)
+        queue_result = await _queue_service.mark_published(content_id, media_id)
+        if "error" in queue_result:
+            await mark_content_published(content_id, media_id, container_id)
         return {
             "status": "published",
-            "media_id": media_id,
+            "content_id": content_id,
+            "media_type": media_type,
+            "post_type": post_type,
             "container_id": container_id,
-            "children_count": len(children_ids),
-            "type": "carousel",
-            "account": account_name or "default",
+            "instagram_media_id": media_id,
+            "account": target_account_name or "default",
         }
     except Exception as e:
-        logger.error(f"[FAIL] Carousel publish failed: {e}")
-        return {"status": "error", "error": str(e), "type": "carousel"}
+        logger.error(f"[FAIL] Publish failed for content_id={content_id}: {e}")
+        return {"status": "error", "content_id": content_id, "error": str(e)}
 
 
-async def check_publish_status(container_id: str) -> dict:
-    """Check whether a media container has finished processing."""
-    if DRY_RUN:
-        return {"id": container_id, "status_code": "FINISHED", "dry_run": True}
-    try:
-        svc = InstagramService()  # Status check doesn't need account-specific service
-        return await svc.check_container_status(container_id)
-    except Exception as e:
-        return {"status": "error", "error": str(e)}
+async def publish_content_by_id(content_id: str, account_name: str = "") -> dict:
+    record = await get_content_by_id(content_id)
+    if not record:
+        return {"status": "error", "error": f"Content {content_id} not found", "content_id": content_id}
+    return await _publish_record(record, account_name)
 
 
-async def mark_as_published(item_id: str, media_id: str) -> dict:
-    """Mark a review queue item as published with the Instagram media ID."""
-    return await _queue_service.mark_published(item_id, media_id)
+async def publish_next_approved(account_name: str = "") -> dict:
+    items = await _queue_service.get_approved_items()
+    if not items:
+        return {"status": "empty", "message": "No approved items in queue"}
+
+    items = sorted(items, key=lambda x: x.get("created_at", ""))
+    next_item = items[0]
+    content_id = next_item.get("content_id") or next_item.get("id")
+    if not content_id:
+        return {"status": "error", "error": "Approved queue item is missing content_id"}
+    return await publish_content_by_id(content_id, account_name)
 
 
-# ------------------------------------------------------------------
-# Build tools list
-# ------------------------------------------------------------------
+async def publish_all_pending(account_name: str = "", limit: int = 50) -> dict:
+    """Publish all approved items that are pending publish, up to limit."""
+    pending = await query_content(
+        approval_status="approved",
+        publish_status="pending",
+        limit=limit,
+    )
+
+    if not pending:
+        return {
+            "status": "empty",
+            "message": "No approved pending items to publish",
+            "processed": 0,
+            "published": 0,
+            "failed": 0,
+            "results": [],
+        }
+
+    pending = sorted(pending, key=lambda x: x.get("created_at", ""))
+
+    results: list[dict] = []
+    published = 0
+    failed = 0
+
+    for record in pending:
+        result = await _publish_record(record, account_name)
+        results.append(result)
+        if str(result.get("status", "")).startswith("published"):
+            published += 1
+        else:
+            failed += 1
+
+    return {
+        "status": "completed",
+        "processed": len(results),
+        "published": published,
+        "failed": failed,
+        "results": results,
+    }
+
 
 def build_publisher_tools() -> list[FunctionTool]:
     return [
         FunctionTool(
             name="list_instagram_accounts",
-            description="List all configured Instagram accounts available for publishing. Shows account names you can pass to publish tools.",
+            description="List all configured Instagram accounts available for publishing.",
             input_model=ListInstagramAccountsInput,
             func=list_instagram_accounts,
         ),
         FunctionTool(
-            name="get_approved_items",
-            description="Fetch all approved items from the review queue that are ready to publish. Call this first to see what's available.",
-            input_model=GetApprovedItemsInput,
-            func=get_approved_items,
+            name="get_pending_approvals",
+            description="Get content records currently pending human approval from Cosmos DB.",
+            input_model=GetPendingApprovalsInput,
+            func=get_pending_approvals,
         ),
         FunctionTool(
-            name="publish_image_post",
-            description="Publish a single image post to Instagram. Requires a publicly accessible image URL and caption.",
-            input_model=PublishImagePostInput,
-            func=publish_image_post,
+            name="get_pending_to_be_published",
+            description="Get approved content that is pending publish.",
+            input_model=GetPendingToPublishInput,
+            func=get_pending_to_be_published,
         ),
         FunctionTool(
-            name="publish_reel",
-            description="Publish a reel/video to Instagram. Waits for video processing (up to 5 min) before publishing.",
-            input_model=PublishReelInput,
-            func=publish_reel,
+            name="get_publish_history",
+            description="Get previously published content history.",
+            input_model=GetPublishHistoryInput,
+            func=get_publish_history,
         ),
         FunctionTool(
-            name="publish_carousel",
-            description="Publish a carousel (2-10 images) to Instagram. Provide a list of image URLs and a single caption.",
-            input_model=PublishCarouselInput,
-            func=publish_carousel,
+            name="get_content_details",
+            description="Get full content details by content_id.",
+            input_model=GetContentByIdInput,
+            func=get_content_details,
         ),
         FunctionTool(
-            name="check_publish_status",
-            description="Check if a media container has finished processing (mainly for videos/reels).",
-            input_model=CheckPublishStatusInput,
-            func=check_publish_status,
+            name="publish_content_by_id",
+            description="Publish a specific approved content item by content_id. Will fail if not approved.",
+            input_model=PublishContentByIdInput,
+            func=publish_content_by_id,
         ),
         FunctionTool(
-            name="mark_as_published",
-            description="Update the review queue item as published. Call after successful Instagram publish.",
-            input_model=MarkAsPublishedInput,
-            func=mark_as_published,
+            name="publish_next_approved",
+            description="Listen to the approved queue and publish the next approved content item.",
+            input_model=PublishNextApprovedInput,
+            func=publish_next_approved,
+        ),
+        FunctionTool(
+            name="publish_all_pending",
+            description="Batch publish all approved content that is pending publish (up to limit). Continues on per-item errors and returns a summary.",
+            input_model=PublishAllPendingInput,
+            func=publish_all_pending,
         ),
     ]

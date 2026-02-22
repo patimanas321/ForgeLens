@@ -119,14 +119,14 @@ AGENT_REGISTRY: dict[Agent, AgentEntry] = {
     Agent.PUBLISHER: AgentEntry(
         name="Publisher",
         description=(
-            "Posts approved content to Instagram via the Graph API. "
-            "Handles image posts, carousels, and reels. Respects optimal "
-            "posting times based on audience analytics."
+            "Publishes approved content to Instagram by content ID only. "
+            "Consumes approved queue items, verifies DB approval state, "
+            "and records publish history in Cosmos DB."
         ),
         tool_name="call_publisher",
         arg_description=(
-            "The approved content to publish — must include media URL, caption, "
-            "and posting preferences (e.g. 'Post immediately' or 'Schedule for 6pm')."
+            "A publishing action such as: 'Publish content_id=<id>', "
+            "'Publish next approved item', or 'Show pending-to-publish history'."
         ),
     ),
 }
