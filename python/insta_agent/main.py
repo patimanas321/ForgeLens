@@ -39,7 +39,7 @@ from shared.account_profile import load_all_profiles
 from agents.account.agent import InstaAccountAgent
 from agents.account.workflow import build_content_pipeline
 from agents.trend_scout.agent import TrendScoutAgent
-from agents.media_generator.agent import MediaGeneratorAgent
+from agents.insta_post_generator.agent import InstaPostGeneratorAgent
 from agents.approver.agent import ReviewQueueAgent
 from agents.publisher.agent import PublisherAgent
 from shared.services.media_metadata_service import ensure_cosmos_resources
@@ -89,7 +89,7 @@ def main():
 
     # --- Create delegable specialist agents (shared across all accounts) ---
     trend_scout_agent = TrendScoutAgent(ai_client)
-    media_generator_agent = MediaGeneratorAgent(ai_client)
+    insta_post_generator_agent = InstaPostGeneratorAgent(ai_client)
     approver_agent = ReviewQueueAgent(ai_client)
 
     # Publisher is standalone: queue listener + content_id publisher
@@ -111,7 +111,7 @@ def main():
             profile,
             child_agents=[
                 trend_scout_agent,
-                media_generator_agent,
+                insta_post_generator_agent,
             ],
         )
         account_agents.append(agent)
@@ -119,7 +119,7 @@ def main():
         # Content pipeline — MAF sequential workflow with HIL before publishing
         pipeline = build_content_pipeline(
             trend_scout=trend_scout_agent,
-            media_generator=media_generator_agent,
+            insta_post_generator=insta_post_generator_agent,
             account_name=profile.account_name,
             display_name=profile.display_name,
         )
@@ -134,7 +134,7 @@ def main():
         + pipeline_agents                    # Content pipeline workflows
         + [
             trend_scout_agent.agent,
-            media_generator_agent.agent,
+            insta_post_generator_agent.agent,
             approver_agent.agent,
         ]
         + [publisher_agent.agent]            # Standalone publisher agent

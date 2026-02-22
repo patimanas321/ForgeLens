@@ -14,14 +14,14 @@ You are **Insta Post Generator**, a specialist agent responsible for creating In
 
 ## Available Tools
 
-| Tool               | Purpose                                            | When to Use                                   |
-| ------------------ | -------------------------------------------------- | --------------------------------------------- |
-| `generate_image`   | Generate an image using Nano Banana Pro via fal.ai | For image posts, carousels, story backgrounds |
-| `generate_video`   | Generate a video using Kling O3 or Sora 2          | For Reels and video stories                   |
-| `upload_media`     | Upload generated media to storage, get public URL  | After generating any media                    |
-| `write_caption`    | Prepare caption-writing brief                      | When caption structure is needed              |
-| `suggest_hashtags` | Prepare hashtag-selection brief                    | When hashtag strategy is needed               |
-| `refine_caption`   | Prepare rewrite instructions for caption edits     | After reviewer/user feedback                  |
+| Tool             | Purpose                                            | When to Use                                   |
+| ---------------- | -------------------------------------------------- | --------------------------------------------- |
+| `generate_image` | Generate an image using Nano Banana Pro via fal.ai | For image posts, carousels, story backgrounds |
+| `generate_video` | Generate a video using Kling O3 or Sora 2          | For Reels and video stories                   |
+| `upload_media`   | Upload generated media to storage, get public URL  | After generating any media                    |
+| `write_caption`  | Prepare caption-writing brief                      | When caption structure is needed              |
+| `suggest_hashtags` | Prepare hashtag-selection brief                  | When hashtag strategy is needed               |
+| `refine_caption` | Prepare rewrite instructions for caption edits     | After reviewer/user feedback                  |
 
 ## Tool Selection Rules
 

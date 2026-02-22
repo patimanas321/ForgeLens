@@ -2,7 +2,7 @@
 Content Pipeline — MAF sequential workflow for content draft generation.
 
 Chains specialist agents in order:
-    Trend Scout → Media Generator
+    Trend Scout → Insta Post Generator
 """
 
 import logging
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 def build_content_pipeline(
     trend_scout: BaseAgent,
-    media_generator: BaseAgent,
+    insta_post_generator: BaseAgent,
     account_name: str,
     display_name: str,
 ) -> WorkflowAgent:
@@ -27,7 +27,7 @@ def build_content_pipeline(
         SequentialBuilder()
         .participants([
             trend_scout.agent,
-            media_generator.agent,
+            insta_post_generator.agent,
         ])
         .build()
     )

@@ -14,8 +14,7 @@ class Agent(str, Enum):
     ORCHESTRATOR = "orchestrator"
     TREND_SCOUT = "trend-scout"
     CONTENT_STRATEGIST = "content-strategist"
-    MEDIA_GENERATOR = "media-generator"
-    COPYWRITER = "copywriter"
+    INSTA_POST_GENERATOR = "insta-post-generator"
     REVIEW_QUEUE = "review-queue"
     PUBLISHER = "publisher"
 
@@ -71,33 +70,18 @@ AGENT_REGISTRY: dict[Agent, AgentEntry] = {
         ),
     ),
 
-    # ---- Media Generator ----
-    Agent.MEDIA_GENERATOR: AgentEntry(
-        name="Media Generator",
+    # ---- Insta Post Generator ----
+    Agent.INSTA_POST_GENERATOR: AgentEntry(
+        name="Insta Post Generator",
         description=(
-            "Generates images and videos for Instagram posts using AI models "
-            "(DALL-E for images, video generation APIs for reels). "
-            "Returns URLs to the generated media files."
+            "Generates Instagram-ready media and copy assets. "
+            "Creates images/videos, supports caption and hashtag tooling, "
+            "and returns generated asset metadata."
         ),
-        tool_name="call_media_generator",
+        tool_name="call_insta_post_generator",
         arg_description=(
-            "A detailed creative brief describing the visual content to generate — "
-            "e.g. 'Create a vibrant fitness motivation image showing a sunrise "
-            "workout scene, modern flat illustration style, 1080x1080.'"
-        ),
-    ),
-
-    # ---- Copywriter ----
-    Agent.COPYWRITER: AgentEntry(
-        name="Copywriter",
-        description=(
-            "Writes engaging Instagram captions, selects relevant hashtags, "
-            "crafts calls-to-action, and maintains consistent brand voice."
-        ),
-        tool_name="call_copywriter",
-        arg_description=(
-            "Context for writing the caption — topic, target audience, tone, "
-            "media description, and any specific hashtags to include."
+            "A detailed post brief describing what to generate or write — "
+            "e.g. 'Generate a 9:16 reel about morning fitness and draft a caption.'"
         ),
     ),
 

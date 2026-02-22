@@ -227,7 +227,7 @@ async def generate_image(
             description=result.get("description", ""),
             approval_status="pending",
             publish_status="pending",
-            extra={"source": "media_generator"},
+            extra={"source": "insta_post_generator"},
         )
 
         await _review_queue.queue_for_review(
@@ -239,7 +239,7 @@ async def generate_image(
             post_type="post",
             target_account_id=settings.INSTAGRAM_BUSINESS_ACCOUNT_ID,
             topic=result.get("description", "") or "Generated image",
-            trend_source="media_generator",
+            trend_source="insta_post_generator",
         )
 
         logger.info(f"[OK] Generated image via Nano Banana Pro: {file_path} → {blob_url}")
@@ -343,7 +343,7 @@ async def generate_video(
             target_account_id=settings.INSTAGRAM_BUSINESS_ACCOUNT_ID,
             approval_status="pending",
             publish_status="pending",
-            extra={"source": "media_generator"},
+            extra={"source": "insta_post_generator"},
         )
 
         await _review_queue.queue_for_review(
@@ -355,7 +355,7 @@ async def generate_video(
             post_type="reel",
             target_account_id=settings.INSTAGRAM_BUSINESS_ACCOUNT_ID,
             topic="Generated reel",
-            trend_source="media_generator",
+            trend_source="insta_post_generator",
         )
 
         logger.info(f"[OK] Generated video via {model_id}: {file_path} → {blob_url}")

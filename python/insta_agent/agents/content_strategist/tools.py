@@ -32,7 +32,7 @@ class SaveContentPlanInput(BaseModel):
     topic: str = Field(..., description="The selected topic for today's content.")
     format: str = Field(..., description="Content format: 'image', 'carousel', 'reel', or 'story'.")
     visual_direction: str = Field(..., description="Description of the visual style and elements.")
-    caption_direction: str = Field(..., description="Tone, hook idea, and CTA guidance for the copywriter.")
+    caption_direction: str = Field(..., description="Tone, hook idea, and CTA guidance for caption generation.")
     hashtag_themes: str = Field(default="", description="Themes for hashtag research.")
     reasoning: str = Field(default="", description="Why this topic was selected over alternatives.")
 

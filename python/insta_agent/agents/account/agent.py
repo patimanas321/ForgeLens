@@ -2,7 +2,7 @@
 InstaAccountAgent — a self-contained Instagram account agent.
 
 Each instance manages one Instagram persona. It delegates work to
-specialist child agents (Trend Scout, Media Generator), while handling
+specialist child agents (Trend Scout, Insta Post Generator), while handling
 strategy/copywriting and account-scoped queue operations internally.
 
 Created dynamically from account profile JSON files in data/accounts/.
