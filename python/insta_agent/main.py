@@ -58,6 +58,8 @@ logger = logging.getLogger("forgelens")
 
 def main():
     logger.info("Starting ForgeLens...")
+    is_cloud = bool(os.environ.get("WEBSITE_INSTANCE_ID"))
+    host = os.environ.get("APP_HOST", "0.0.0.0" if is_cloud else "127.0.0.1")
 
     # --- Ensure Cosmos DB database + container exist ---
     if settings.COSMOS_ENDPOINT:
@@ -155,16 +157,17 @@ def main():
         ]
         + [publisher_agent.agent]            # Standalone publisher agent
     )
-    server = DevServer(port=settings.PORT, host="127.0.0.1", ui_enabled=True)
+    server = DevServer(port=settings.PORT, host=host, ui_enabled=True)
     server.register_entities(all_entities)
 
-    url = f"http://127.0.0.1:{settings.PORT}"
+    url = f"http://{host}:{settings.PORT}"
     logger.info(f"ForgeLens DevUI: {url}")
     logger.info("Select an account in the UI to start creating content")
 
-    threading.Timer(1.5, webbrowser.open, args=[url]).start()
+    if not is_cloud:
+        threading.Timer(1.5, webbrowser.open, args=[url]).start()
 
-    uvicorn.run(server.get_app(), host="127.0.0.1", port=settings.PORT)
+    uvicorn.run(server.get_app(), host=host, port=settings.PORT)
 
 
 if __name__ == "__main__":
