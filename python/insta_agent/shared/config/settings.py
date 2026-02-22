@@ -1,34 +1,88 @@
-"""Centralized configuration loaded from environment variables."""
+"""Centralized configuration loaded from environment variables + Azure Key Vault.
 
+Secrets (API keys, tokens) come from Key Vault with env-var fallback for local dev.
+Non-secret config (endpoints, model names, container names) stays in env vars.
+"""
+
+import logging
 import os
+
 from dotenv import load_dotenv
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
+
+def _kv_or_env(kv_name: str, env_name: str, default: str = "") -> str:
+    """Try Key Vault first, fall back to env var, then default."""
+    # Lazy import avoids circular dependency at module load
+    from shared.config.keyvault import kv
+
+    value = kv.get(kv_name)
+    if value:
+        return value
+    return os.environ.get(env_name, default)
+
 
 class Settings:
     # --- Managed Identity (for Azure-hosted deployments) ---
-    AZURE_CLIENT_ID: str = os.environ.get("AZURE_CLIENT_ID", "02911707-a3a0-49b8-8ab0-4a8f0c9a5830")
+    AZURE_CLIENT_ID: str = os.environ.get("AZURE_CLIENT_ID", "")
+
+    # --- Azure Key Vault ---
+    AZURE_KEYVAULT_URL: str = os.environ.get("AZURE_KEYVAULT_URL", "https://forgelens-kv.vault.azure.net/")
 
     # --- Azure OpenAI ---
     AZURE_OPENAI_ENDPOINT: str = os.environ.get("AZURE_OPENAI_ENDPOINT", "https://forgelens-openai.openai.azure.com")
     AZURE_OPENAI_DEPLOYMENT: str = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt5-mini")
-    AZURE_OPENAI_DEPLOYMENT_STRONG: str = os.environ.get("AZURE_OPENAI_DEPLOYMENT_STRONG", "gpt5-mini")
     AZURE_OPENAI_API_VERSION: str = os.environ.get("AZURE_OPENAI_API_VERSION", "2025-03-01-preview")
     AZURE_OPENAI_IMAGE_DEPLOYMENT: str = os.environ.get("AZURE_OPENAI_IMAGE_DEPLOYMENT", "dall-e-3")
 
-    # --- fal.ai Media Generation ---
-    FAL_KEY: str = os.environ.get("FAL_KEY", "0a432dc9-87cc-42ad-9f6d-3643e910872e:b4a84c015bcb64b30a999b54b1f5a0a9")
+    # --- fal.ai Media Generation (secret from KV) ---
+    @property
+    def FAL_KEY(self) -> str:
+        return _kv_or_env("fal-key", "FAL_KEY")
+
     FAL_IMAGE_MODEL: str = os.environ.get("FAL_IMAGE_MODEL", "fal-ai/nano-banana-pro")
     FAL_VIDEO_MODEL: str = os.environ.get("FAL_VIDEO_MODEL", "fal-ai/kling-video/o3/standard/text-to-video")
     FAL_VIDEO_MODEL_ALT: str = os.environ.get("FAL_VIDEO_MODEL_ALT", "fal-ai/sora-2/text-to-video")
 
-    # --- Instagram Graph API ---
-    INSTAGRAM_BUSINESS_ACCOUNT_ID: str = os.environ.get("INSTAGRAM_BUSINESS_ACCOUNT_ID", "")
-    INSTAGRAM_ACCESS_TOKEN: str = os.environ.get("INSTAGRAM_ACCESS_TOKEN", "")
+    # --- Instagram Graph API (secrets from KV) ---
+    @property
+    def INSTAGRAM_ACCESS_TOKEN(self) -> str:
+        return _kv_or_env("instagram-access-token", "INSTAGRAM_ACCESS_TOKEN")
 
-    # --- Web Search (Tavily MCP) ---
-    TAVILY_MCP_URL: str = os.environ.get("TAVILY_MCP_URL", "https://mcp.tavily.com/mcp/?tavilyApiKey=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")
+    @property
+    def INSTAGRAM_BUSINESS_ACCOUNT_ID(self) -> str:
+        """Default account ID — first one discovered in KV, or env var fallback."""
+        from shared.config.keyvault import kv
+        _, account_id = kv.default_instagram_account
+        return account_id or os.environ.get("INSTAGRAM_BUSINESS_ACCOUNT_ID", "")
+
+    @property
+    def INSTAGRAM_ACCOUNTS(self) -> dict[str, str]:
+        """All IG accounts: {name: account_id}. For multi-account publishing."""
+        from shared.config.keyvault import kv
+        accounts = kv.instagram_accounts
+        # Fallback: if KV has nothing, use the single env var
+        if not accounts:
+            single = os.environ.get("INSTAGRAM_BUSINESS_ACCOUNT_ID", "")
+            if single:
+                accounts = {"default": single}
+        return accounts
+
+    # --- Web Search / Tavily (secret from KV) ---
+    @property
+    def TAVILY_API_KEY(self) -> str:
+        return _kv_or_env("tavily-api-key", "TAVILY_API_KEY")
+
+    @property
+    def TAVILY_MCP_URL(self) -> str:
+        """Build MCP URL from KV api key, or fall back to env var."""
+        key = self.TAVILY_API_KEY
+        if key:
+            return f"https://mcp.tavily.com/mcp/?tavilyApiKey={key}"
+        return os.environ.get("TAVILY_MCP_URL", "")
 
     # --- Azure Blob Storage ---
     AZURE_STORAGE_ACCOUNT_URL: str = os.environ.get("AZURE_STORAGE_ACCOUNT_URL", "https://forgelensstorage.blob.core.windows.net/")

@@ -72,18 +72,10 @@ def main():
         credential, "https://cognitiveservices.azure.com/.default"
     )
 
-    # gpt5-mini — for orchestrator + complex reasoning (content strategist, media generator)
+    # Single Azure OpenAI client — all agents share the same deployment
     # base_url overrides the SDK's hardcoded /openai/v1/ path — the Responses API lives at /openai/
     base_url = f"{settings.AZURE_OPENAI_ENDPOINT}/openai/"
-    strong_client = AzureOpenAIResponsesClient(
-        base_url=base_url,
-        deployment_name=settings.AZURE_OPENAI_DEPLOYMENT_STRONG,
-        ad_token_provider=token_provider,
-        api_version=settings.AZURE_OPENAI_API_VERSION,
-    )
-
-    # gpt5-mini — fast & cheap for lighter agents
-    lite_client = AzureOpenAIResponsesClient(
+    ai_client = AzureOpenAIResponsesClient(
         base_url=base_url,
         deployment_name=settings.AZURE_OPENAI_DEPLOYMENT,
         ad_token_provider=token_provider,
@@ -91,20 +83,18 @@ def main():
     )
 
     # --- Create specialist agents ---
-    # Strong client: content strategist (planning), media generator (prompt engineering)
-    # Lite client: trend scout (search), copywriter (text), review queue (routing), publisher (API calls)
-    trend_scout = TrendScoutAgent(lite_client)
-    content_strategist = ContentStrategistAgent(strong_client)
-    media_generator = MediaGeneratorAgent(strong_client)
-    copywriter = CopywriterAgent(lite_client)
-    review_queue = ReviewQueueAgent(lite_client)
-    publisher = PublisherAgent(lite_client)
+    trend_scout = TrendScoutAgent(ai_client)
+    content_strategist = ContentStrategistAgent(ai_client)
+    media_generator = MediaGeneratorAgent(ai_client)
+    copywriter = CopywriterAgent(ai_client)
+    review_queue = ReviewQueueAgent(ai_client)
+    publisher = PublisherAgent(ai_client)
 
-    logger.info("Specialist agents created (gpt-4o: strategist, media | gpt-4o-mini: scout, copy, review, publish)")
+    logger.info(f"Specialist agents created (deployment: {settings.AZURE_OPENAI_DEPLOYMENT})")
 
     # --- Create orchestrator (wraps all specialists as tools) ---
     orchestrator = OrchestratorAgent(
-        strong_client,
+        ai_client,
         child_agents=[
             trend_scout,
             content_strategist,

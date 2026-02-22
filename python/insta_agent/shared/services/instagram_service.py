@@ -14,14 +14,18 @@ GRAPH_API_BASE = "https://graph.facebook.com/v21.0"
 
 
 class InstagramService(BaseService):
-    """Client for the Instagram Graph API (via Meta's Graph API)."""
+    """Client for the Instagram Graph API (via Meta's Graph API).
+    
+    Supports multi-account: pass account_id to target a specific IG account,
+    or omit to use the default account from Key Vault / env var.
+    """
 
-    def __init__(self) -> None:
+    def __init__(self, account_id: str | None = None) -> None:
         super().__init__(
             base_url=GRAPH_API_BASE,
             bearer_token=settings.INSTAGRAM_ACCESS_TOKEN,
         )
-        self.ig_account_id = settings.INSTAGRAM_BUSINESS_ACCOUNT_ID
+        self.ig_account_id = account_id or settings.INSTAGRAM_BUSINESS_ACCOUNT_ID
 
     # ------------------------------------------------------------------
     # Publishing

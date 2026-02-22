@@ -2,7 +2,6 @@
 
 import json
 import logging
-from urllib.parse import parse_qs, urlparse
 
 from agent_framework import FunctionTool
 from pydantic import BaseModel, Field
@@ -12,9 +11,14 @@ from shared.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
-# Extract API key from the MCP URL so we don't need a separate env var
-_parsed = urlparse(settings.TAVILY_MCP_URL)
-_api_key = parse_qs(_parsed.query).get("tavilyApiKey", [""])[0]
+# Get API key directly from KV-backed settings (falls back to env var / MCP URL)
+_api_key = settings.TAVILY_API_KEY
+if not _api_key:
+    # Legacy fallback: parse from MCP URL
+    from urllib.parse import parse_qs, urlparse
+    _parsed = urlparse(settings.TAVILY_MCP_URL)
+    _api_key = parse_qs(_parsed.query).get("tavilyApiKey", [""])[0]
+
 _client = AsyncTavilyClient(api_key=_api_key)
 
 
