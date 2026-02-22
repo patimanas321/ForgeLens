@@ -15,6 +15,7 @@ class Agent(str, Enum):
     TREND_SCOUT = "trend-scout"
     CONTENT_STRATEGIST = "content-strategist"
     INSTA_POST_GENERATOR = "insta-post-generator"
+    COMMUNICATOR = "communicator"
     REVIEW_QUEUE = "review-queue"
     PUBLISHER = "publisher"
 
@@ -82,6 +83,20 @@ AGENT_REGISTRY: dict[Agent, AgentEntry] = {
         arg_description=(
             "A detailed post brief describing what to generate or write — "
             "e.g. 'Generate a 9:16 reel about morning fitness and draft a caption.'"
+        ),
+    ),
+
+    # ---- Communicator ----
+    Agent.COMMUNICATOR: AgentEntry(
+        name="Communicator",
+        description=(
+            "Handles reviewer communications and reminders for pending approvals. "
+            "Can be called by account agents and also used by queue-trigger automation."
+        ),
+        tool_name="call_communicator",
+        arg_description=(
+            "A communication action such as 'Send reminder for item <id>' or "
+            "'Notify pending approvals for account <id>'."
         ),
     ),
 

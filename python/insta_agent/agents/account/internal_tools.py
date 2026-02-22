@@ -12,7 +12,6 @@ from agent_framework import FunctionTool
 from pydantic import BaseModel, Field
 
 from shared.services.media_metadata_service import get_content_by_id, query_content
-from shared.services.notification_service import NotificationService
 from shared.services.review_queue_service import ReviewQueueService
 
 
@@ -58,10 +57,6 @@ class GetApprovedItemsInput(BaseModel):
     pass
 
 
-class NotifyReviewerInput(BaseModel):
-    item_id: str = Field(..., description="The ID of the item to notify about.")
-
-
 def _parse_iso(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -78,7 +73,6 @@ def build_account_internal_tools(
     frequency_targets: dict[str, str],
 ) -> list[FunctionTool]:
     queue_service = ReviewQueueService(account_name=account_name)
-    notification_service = NotificationService()
 
     async def get_recent_post_history(limit: int = 20, content_type: str = "") -> dict:
         items = await query_content(
@@ -193,18 +187,6 @@ def build_account_internal_tools(
             "items": items,
         }
 
-    async def notify_reviewer(item_id: str) -> dict:
-        status = await get_review_status(item_id)
-        if "error" in status:
-            return status
-        await notification_service.notify_new_review(status)
-        return {
-            "status": "notified",
-            "item_id": item_id,
-            "account": account_name,
-            "message": "Reviewer notified for this account item",
-        }
-
     return [
         FunctionTool(
             name="get_recent_post_history",
@@ -245,11 +227,5 @@ def build_account_internal_tools(
             description="View approved items for this account only.",
             input_model=GetApprovedItemsInput,
             func=get_approved_items,
-        ),
-        FunctionTool(
-            name="notify_reviewer",
-            description="Notify reviewer for an item that belongs to this account.",
-            input_model=NotifyReviewerInput,
-            func=notify_reviewer,
         ),
     ]

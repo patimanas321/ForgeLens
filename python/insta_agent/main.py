@@ -41,9 +41,12 @@ from agents.account.workflow import build_content_pipeline
 from agents.trend_scout.agent import TrendScoutAgent
 from agents.insta_post_generator.agent import InstaPostGeneratorAgent
 from agents.approver.agent import ReviewQueueAgent
+from agents.communicator.agent import CommunicatorAgent
 from agents.publisher.agent import PublisherAgent
 from shared.services.media_metadata_service import ensure_cosmos_resources
 from shared.services.review_queue_service import ensure_servicebus_queues
+from shared.services.communicator_trigger_service import start_communicator_queue_trigger_worker
+from shared.services.publisher_trigger_service import start_publisher_queue_trigger_worker
 
 # --- Logging ---
 logging.basicConfig(
@@ -91,6 +94,7 @@ def main():
     trend_scout_agent = TrendScoutAgent(ai_client)
     insta_post_generator_agent = InstaPostGeneratorAgent(ai_client)
     approver_agent = ReviewQueueAgent(ai_client)
+    communicator_agent = CommunicatorAgent(ai_client)
 
     # Publisher is standalone: queue listener + content_id publisher
     publisher_agent = PublisherAgent(ai_client)
@@ -112,6 +116,7 @@ def main():
             child_agents=[
                 trend_scout_agent,
                 insta_post_generator_agent,
+                communicator_agent,
             ],
         )
         account_agents.append(agent)
@@ -128,6 +133,16 @@ def main():
     logger.info(f"Created {len(account_agents)} account agent(s): {[a.profile.display_name for a in account_agents]}")
     logger.info(f"Created {len(pipeline_agents)} content pipeline(s)")
 
+    if settings.SERVICEBUS_NAMESPACE:
+        start_communicator_queue_trigger_worker(
+            poll_interval_seconds=20,
+            communicator_agent=communicator_agent.agent,
+        )
+        start_publisher_queue_trigger_worker(
+            poll_interval_seconds=20,
+            publisher_agent=publisher_agent.agent,
+        )
+
     # --- Build and start server ---
     all_entities = (
         [a.agent for a in account_agents]   # Account persona agents
@@ -135,6 +150,7 @@ def main():
         + [
             trend_scout_agent.agent,
             insta_post_generator_agent.agent,
+            communicator_agent.agent,
             approver_agent.agent,
         ]
         + [publisher_agent.agent]            # Standalone publisher agent
