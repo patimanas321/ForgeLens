@@ -1,5 +1,5 @@
 """
-Tools for the Review Queue agent — human-in-the-loop approval workflow.
+Tools for the Approver agent — human-in-the-loop approval management.
 """
 
 import logging
@@ -7,92 +7,82 @@ from agent_framework import FunctionTool
 from pydantic import BaseModel, Field
 
 from shared.services.review_queue_service import ReviewQueueService
-from shared.services.notification_service import NotificationService
+from shared.services.media_metadata_service import query_content
 
 logger = logging.getLogger(__name__)
 
 _queue_service = ReviewQueueService()
-_notification_service = NotificationService()
 
 
 # ------------------------------------------------------------------
 # Input schemas
 # ------------------------------------------------------------------
 
-class QueueForReviewInput(BaseModel):
-    media_url: str = Field(..., description="URL or path to the generated media file.")
-    caption: str = Field(..., description="The full Instagram caption text.")
-    hashtags: str = Field(..., description="The hashtag string to accompany the post.")
-    content_type: str = Field(
-        default="image",
-        description="Type of content: 'image', 'carousel', 'reel', 'story'.",
-    )
-    topic: str = Field(default="", description="The topic/theme of the post.")
-    trend_source: str = Field(default="", description="Where the trend was discovered.")
-
-
-class GetReviewStatusInput(BaseModel):
+class ViewDetailsInput(BaseModel):
     item_id: str = Field(..., description="The ID of the review item to check.")
 
 
-class GetApprovedItemsInput(BaseModel):
+class ViewAllPendingInput(BaseModel):
     pass  # No parameters needed
 
 
-class GetPendingReviewsInput(BaseModel):
-    pass  # No parameters needed
+class ViewApprovalHistoryInput(BaseModel):
+    limit: int = Field(default=50, ge=1, le=500)
 
 
-class NotifyReviewerInput(BaseModel):
-    item_id: str = Field(..., description="The ID of the item to notify about.")
+class ApproveItemInput(BaseModel):
+    item_id: str = Field(..., description="The ID of the item to approve.")
+    notes: str = Field(default="", description="Optional reviewer notes.")
+
+
+class RejectItemInput(BaseModel):
+    item_id: str = Field(..., description="The ID of the item to reject.")
+    notes: str = Field(default="", description="Optional rejection reason.")
+
+
+class RequestEditsInput(BaseModel):
+    item_id: str = Field(..., description="The ID of the item requiring edits.")
+    notes: str = Field(..., description="Required edit instructions for revision.")
 
 
 # ------------------------------------------------------------------
 # Tool functions
 # ------------------------------------------------------------------
 
-async def queue_for_review(
-    media_url: str,
-    caption: str,
-    hashtags: str,
-    content_type: str = "image",
-    topic: str = "",
-    trend_source: str = "",
-) -> dict:
-    """Add a complete post to the human review queue."""
-    item = await _queue_service.queue_for_review(
-        media_url=media_url,
-        caption=caption,
-        hashtags=hashtags,
-        content_type=content_type,
-        topic=topic,
-        trend_source=trend_source,
-    )
-    return item
-
-
-async def get_pending_reviews() -> list[dict]:
-    """Get all items currently awaiting human review."""
+async def view_all_pending() -> list[dict]:
+    """View all items currently awaiting human review."""
     return await _queue_service.get_pending_reviews()
 
 
-async def get_review_status(item_id: str) -> dict:
-    """Check the review status of a specific item."""
+async def view_details(item_id: str) -> dict:
+    """View approval details/status of a specific item."""
     return await _queue_service.get_review_status(item_id)
 
 
-async def get_approved_items() -> list[dict]:
-    """Get all approved items that are ready to be published."""
-    return await _queue_service.get_approved_items()
+async def view_approval_history(limit: int = 50) -> dict:
+    """View reviewed approval history (approved/rejected/edit_requested)."""
+    items = await query_content(limit=limit)
+    reviewed = [
+        item for item in items
+        if item.get("approval_status") in {"approved", "rejected", "edit_requested"}
+    ]
+    reviewed.sort(key=lambda x: x.get("reviewed_at") or x.get("created_at") or "", reverse=True)
+    return {"count": len(reviewed), "items": reviewed}
 
 
-async def notify_reviewer(item_id: str) -> dict:
-    """Send a notification to the human reviewer about a pending item."""
-    item = await _queue_service.get_review_status(item_id)
-    if "error" in item:
-        return item
-    await _notification_service.notify_new_review(item)
-    return {"status": "notified", "item_id": item_id}
+async def approve_item(item_id: str, notes: str = "") -> dict:
+    """Approve a pending item and move it to approved queue."""
+    return await _queue_service.approve_item(item_id, notes)
+
+
+async def reject_item(item_id: str, notes: str = "") -> dict:
+    """Reject a pending item."""
+    return await _queue_service.reject_item(item_id, notes)
+
+
+async def request_edits(item_id: str, notes: str) -> dict:
+    """Request edits for a pending item."""
+    return await _queue_service.request_edits(item_id, notes)
 
 
 # ------------------------------------------------------------------
@@ -102,36 +92,41 @@ async def notify_reviewer(item_id: str) -> dict:
 def build_review_queue_tools() -> list[FunctionTool]:
     return [
         FunctionTool(
-            name="queue_for_review",
+            name="approve",
             description=(
-                "Add a complete Instagram post (media + caption + hashtags) to the "
-                "human review queue. Returns the item ID and status."
+                "Approve a pending content item and move it to the approved queue."
             ),
-            input_model=QueueForReviewInput,
-            func=queue_for_review,
+            input_model=ApproveItemInput,
+            func=approve_item,
         ),
         FunctionTool(
-            name="get_pending_reviews",
-            description="List all items currently awaiting human review.",
-            input_model=GetPendingReviewsInput,
-            func=get_pending_reviews,
+            name="reject",
+            description="Reject a pending content item.",
+            input_model=RejectItemInput,
+            func=reject_item,
         ),
         FunctionTool(
-            name="get_review_status",
-            description="Check the review status of a specific item by its ID.",
-            input_model=GetReviewStatusInput,
-            func=get_review_status,
+            name="view_details",
+            description="View detailed approval status for a specific item ID.",
+            input_model=ViewDetailsInput,
+            func=view_details,
         ),
         FunctionTool(
-            name="get_approved_items",
-            description="Get all approved items that are ready to be published to Instagram.",
-            input_model=GetApprovedItemsInput,
-            func=get_approved_items,
+            name="view_all_pending",
+            description="View all pending items awaiting review.",
+            input_model=ViewAllPendingInput,
+            func=view_all_pending,
         ),
         FunctionTool(
-            name="notify_reviewer",
-            description="Send a Slack/email notification to the human reviewer about a pending item.",
-            input_model=NotifyReviewerInput,
-            func=notify_reviewer,
+            name="view_approval_history",
+            description="View approval history across approved/rejected/edit-requested items.",
+            input_model=ViewApprovalHistoryInput,
+            func=view_approval_history,
+        ),
+        FunctionTool(
+            name="request_edits",
+            description="Request edits for a pending item with reviewer notes.",
+            input_model=RequestEditsInput,
+            func=request_edits,
         ),
     ]

@@ -1,4 +1,4 @@
-"""Review Queue agent — manages human-in-the-loop approval workflow."""
+"""Approver agent — manages human-in-the-loop approval decisions."""
 
 from agent_registry import Agent
 from shared.base_agent import BaseAgent

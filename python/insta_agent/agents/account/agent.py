@@ -1,9 +1,9 @@
 """
 InstaAccountAgent — a self-contained Instagram account agent.
 
-Each instance manages one Instagram persona.  It delegates work to
-specialist child agents (Trend Scout, Content Strategist, Media Generator,
-Copywriter, Review Queue, Publisher) rather than owning tools directly.
+Each instance manages one Instagram persona. It delegates work to
+specialist child agents (Trend Scout, Media Generator), while handling
+strategy/copywriting and account-scoped queue operations internally.
 
 Created dynamically from account profile JSON files in data/accounts/.
 """
@@ -17,7 +17,9 @@ from agent_framework import ChatAgent
 from agent_framework.azure import AzureOpenAIResponsesClient
 
 from shared.account_profile import AccountProfile
+from shared.config.settings import settings
 from shared.base_agent import BaseAgent
+from .internal_tools import build_account_internal_tools
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +41,15 @@ class InstaAccountAgent:
 
         prompt = self._render_prompt()
 
-        # Specialist child agents exposed as callable tools
-        tools = [c.as_tool() for c in self._child_agents]
+        account_id = settings.INSTAGRAM_ACCOUNTS.get(profile.account_name, "")
+        own_tools = build_account_internal_tools(
+            account_name=profile.account_name,
+            target_account_id=account_id,
+            frequency_targets=profile.content_rules.content_type_frequency,
+        )
+
+        # Account-native tools + specialist child agents exposed as callable tools
+        tools = own_tools + [c.as_tool() for c in self._child_agents]
 
         self._agent = ChatAgent(
             chat_client=chat_client,
@@ -54,7 +63,7 @@ class InstaAccountAgent:
 
         logger.info(
             f"[account] Created agent: {profile.display_name} "
-            f"({profile.account_name}) with {len(tools)} specialist tools"
+            f"({profile.account_name}) with {len(tools)} total tools"
         )
 
     def _render_prompt(self) -> str:
@@ -68,6 +77,12 @@ class InstaAccountAgent:
         # Build theme and avoid lists as markdown
         themes_list = "\n".join(f"- {t}" for t in persona.themes)
         avoid_list = "\n".join(f"- {a}" for a in persona.avoid)
+        frequency_map = rules.content_type_frequency or {}
+        content_type_frequency_list = (
+            "\n".join(f"- {k}: {v}" for k, v in frequency_map.items())
+            if frequency_map
+            else "- Not configured"
+        )
 
         return template.format(
             display_name=p.display_name,
@@ -78,6 +93,7 @@ class InstaAccountAgent:
             persona_audience=persona.audience,
             themes_list=themes_list,
             avoid_list=avoid_list,
+            content_type_frequency_list=content_type_frequency_list,
             visual_style=rules.visual_style,
             caption_style=rules.caption_style,
             image_aspect_ratio=media.image_aspect_ratio,

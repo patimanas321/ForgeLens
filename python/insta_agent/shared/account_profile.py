@@ -38,6 +38,7 @@ class ContentRules:
     hashtag_count: dict[str, int]
     caption_style: str
     visual_style: str
+    content_type_frequency: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

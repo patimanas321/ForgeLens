@@ -1,13 +1,8 @@
 """
-Content Pipeline — MAF sequential workflow with human-in-the-loop.
+Content Pipeline — MAF sequential workflow for content draft generation.
 
 Chains specialist agents in order:
-  Trend Scout → Content Strategist → Media Generator → Copywriter → [HIL] → Publisher
-
-After the Copywriter finishes (media generated, caption written, hashtags done),
-the workflow pauses for human review via `with_request_info()`.  The human can:
-  • **Approve** — the Publisher will post to Instagram.
-  • **Provide feedback** — the Copywriter re-runs with the revision notes.
+    Trend Scout → Media Generator
 """
 
 import logging
@@ -20,32 +15,20 @@ logger = logging.getLogger(__name__)
 
 
 def build_content_pipeline(
-    specialist_agents: list[BaseAgent],
+    trend_scout: BaseAgent,
+    media_generator: BaseAgent,
     account_name: str,
     display_name: str,
 ) -> WorkflowAgent:
-    """Build a sequential content-creation workflow with HIL before publishing."""
+    """Build a sequential content-creation workflow for trend + media generation."""
 
-    # Index specialists by class name for clarity
-    by_type = {type(a).__name__: a for a in specialist_agents}
-
-    trend_scout = by_type["TrendScoutAgent"]
-    content_strategist = by_type["ContentStrategistAgent"]
-    media_generator = by_type["MediaGeneratorAgent"]
-    copywriter = by_type["CopywriterAgent"]
-    publisher = by_type["PublisherAgent"]
-
-    # Sequential pipeline — HIL pause BEFORE Publisher runs
+    # Sequential pipeline — generates content drafts for account-level queueing
     workflow = (
         SequentialBuilder()
         .participants([
             trend_scout.agent,
-            content_strategist.agent,
             media_generator.agent,
-            copywriter.agent,
-            publisher.agent,
         ])
-        .with_request_info(agents=[publisher.agent])
         .build()
     )
 
@@ -55,13 +38,13 @@ def build_content_pipeline(
         name=f"{display_name} — Content Pipeline",
         description=(
             f"End-to-end content creation pipeline for {display_name}. "
-            "Discovers trends → plans content → generates media → writes caption → "
-            "pauses for human review → publishes to Instagram."
+            "Discovers trends → generates media drafts. "
+            "Queueing and approval are handled separately."
         ),
     )
 
     logger.info(
         f"[workflow] Built content pipeline for {display_name} "
-        f"(5 agents, HIL before Publisher)"
+        f"(2 agents, trend + media generation)"
     )
     return pipeline_agent

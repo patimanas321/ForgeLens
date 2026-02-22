@@ -19,6 +19,12 @@ from azure.servicebus.aio import ServiceBusClient
 from azure.servicebus.aio.management import ServiceBusAdministrationClient
 
 from shared.config.settings import settings
+from shared.services.media_metadata_service import (
+    get_content_by_id,
+    mark_content_published,
+    set_approval_status,
+    update_content,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -99,29 +105,52 @@ class ReviewQueueService:
     async def queue_for_review(
         self,
         *,
+        content_id: str,
         media_url: str,
-        caption: str,
-        hashtags: str,
+        caption: str = "",
+        hashtags: str = "",
         content_type: str = "image",
+        post_type: str = "post",
+        target_account_id: str = "",
         topic: str = "",
         trend_source: str = "",
     ) -> dict:
         """Send a content item to the review-pending queue."""
-        item_id = str(uuid.uuid4())[:8]
+        item_id = content_id or str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+
         item = {
             "id": item_id,
+            "content_id": item_id,
             "status": ReviewStatus.PENDING,
             "account": self._account,
+            "target_account_id": target_account_id,
             "media_url": media_url,
             "caption": caption,
             "hashtags": hashtags,
             "content_type": content_type,
+            "post_type": post_type,
             "topic": topic,
             "trend_source": trend_source,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": now,
             "reviewed_at": None,
             "reviewer_notes": "",
         }
+
+        db_item = await get_content_by_id(item_id)
+        if db_item:
+            await update_content(
+                item_id,
+                {
+                    "approval_status": ReviewStatus.PENDING,
+                    "publish_status": db_item.get("publish_status", "pending"),
+                    "queued_for_review_at": now,
+                    "caption": caption or db_item.get("caption", ""),
+                    "hashtags": [h.strip() for h in hashtags.split() if h.strip()] or db_item.get("hashtags", []),
+                    "post_type": post_type or db_item.get("post_type", "post"),
+                    "target_account_id": target_account_id or db_item.get("target_account_id", ""),
+                },
+            )
 
         client = self._get_client()
         sender = client.get_queue_sender(QUEUE_PENDING)
@@ -154,6 +183,32 @@ class ReviewQueueService:
     async def get_approved_items(self) -> list[dict]:
         """Peek at approved items ready to publish."""
         return await self._peek_queue(QUEUE_APPROVED)
+
+    async def get_review_status(self, item_id: str) -> dict:
+        """Get status for an item from pending/approved queue, or fallback to DB."""
+        pending = await self._peek_queue(QUEUE_PENDING)
+        for item in pending:
+            if item.get("id") == item_id:
+                return item
+
+        approved = await self._peek_queue(QUEUE_APPROVED)
+        for item in approved:
+            if item.get("id") == item_id:
+                return item
+
+        db_item = await get_content_by_id(item_id)
+        if db_item:
+            return {
+                "id": db_item.get("id"),
+                "status": db_item.get("approval_status", "unknown"),
+                "publish_status": db_item.get("publish_status", "pending"),
+                "target_account_id": db_item.get("target_account_id", ""),
+                "created_at": db_item.get("created_at"),
+                "reviewed_at": db_item.get("reviewed_at"),
+                "reviewer_notes": db_item.get("reviewer_notes", ""),
+            }
+
+        return {"error": f"Item {item_id} not found"}
 
     # ------------------------------------------------------------------
     # Reviewer-facing: approve / reject / request edits
@@ -189,6 +244,7 @@ class ReviewQueueService:
                     body["published_at"] = datetime.now(timezone.utc).isoformat()
                     body["instagram_media_id"] = media_id
                     await receiver.complete_message(msg)
+                    await mark_content_published(item_id, media_id)
                     logger.info(f"[Service Bus] Marked {item_id} as published")
                     return body
                 else:
@@ -231,6 +287,7 @@ class ReviewQueueService:
                     body["reviewed_at"] = datetime.now(timezone.utc).isoformat()
                     body["reviewer_notes"] = notes
                     await receiver.complete_message(msg)
+                    await set_approval_status(item_id, new_status, notes)
 
                     # If approved, forward to the approved queue
                     if new_status == ReviewStatus.APPROVED:

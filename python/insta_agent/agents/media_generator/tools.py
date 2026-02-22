@@ -25,8 +25,10 @@ from pydantic import BaseModel, Field
 from shared.config.settings import settings
 from shared.services.blob_storage_service import upload_blob
 from shared.services.media_metadata_service import save_media_metadata
+from shared.services.review_queue_service import ReviewQueueService
 
 logger = logging.getLogger(__name__)
+_review_queue = ReviewQueueService()
 
 # Local media storage for MVP (swap for Azure Blob Storage in production)
 MEDIA_DIR = Path(__file__).parent.parent.parent / "data" / "media"
@@ -181,7 +183,24 @@ async def generate_image(
             height=image_data.get("height"),
             file_size_bytes=blob_info["file_size_bytes"],
             fal_url=image_url,
-            extra={"description": result.get("description", "")},
+            post_type="post",
+            target_account_id=settings.INSTAGRAM_BUSINESS_ACCOUNT_ID,
+            description=result.get("description", ""),
+            approval_status="pending",
+            publish_status="pending",
+            extra={"source": "media_generator"},
+        )
+
+        await _review_queue.queue_for_review(
+            content_id=doc["id"],
+            media_url=blob_url,
+            caption="",
+            hashtags="",
+            content_type="image",
+            post_type="post",
+            target_account_id=settings.INSTAGRAM_BUSINESS_ACCOUNT_ID,
+            topic=result.get("description", "") or "Generated image",
+            trend_source="media_generator",
         )
 
         logger.info(f"[OK] Generated image via Nano Banana Pro: {file_path} → {blob_url}")
@@ -192,6 +211,9 @@ async def generate_image(
             "file_name": file_path.name,
             "blob_url": blob_url,
             "cosmos_id": doc["id"],
+            "content_id": doc["id"],
+            "approval_status": "pending",
+            "queue_status": "queued",
             "prompt_used": prompt,
             "description": result.get("description", ""),
             "aspect_ratio": aspect_ratio,
@@ -278,6 +300,23 @@ async def generate_video(
             duration_seconds=duration,
             file_size_bytes=blob_info["file_size_bytes"],
             fal_url=video_url,
+            post_type="reel",
+            target_account_id=settings.INSTAGRAM_BUSINESS_ACCOUNT_ID,
+            approval_status="pending",
+            publish_status="pending",
+            extra={"source": "media_generator"},
+        )
+
+        await _review_queue.queue_for_review(
+            content_id=doc["id"],
+            media_url=blob_url,
+            caption="",
+            hashtags="",
+            content_type="video",
+            post_type="reel",
+            target_account_id=settings.INSTAGRAM_BUSINESS_ACCOUNT_ID,
+            topic="Generated reel",
+            trend_source="media_generator",
         )
 
         logger.info(f"[OK] Generated video via {model_id}: {file_path} → {blob_url}")
@@ -288,6 +327,9 @@ async def generate_video(
             "file_name": file_path.name,
             "blob_url": blob_url,
             "cosmos_id": doc["id"],
+            "content_id": doc["id"],
+            "approval_status": "pending",
+            "queue_status": "queued",
             "prompt_used": prompt,
             "duration_seconds": duration,
             "aspect_ratio": aspect_ratio,

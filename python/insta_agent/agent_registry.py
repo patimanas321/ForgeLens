@@ -101,17 +101,18 @@ AGENT_REGISTRY: dict[Agent, AgentEntry] = {
         ),
     ),
 
-    # ---- Review Queue (Human-in-the-Loop) ----
+    # ---- Approver (Human-in-the-Loop) ----
     Agent.REVIEW_QUEUE: AgentEntry(
-        name="Review Queue",
+        name="Approver",
         description=(
-            "Manages the human-in-the-loop approval workflow. Queues content "
-            "for review, checks approval status, and handles edits or rejections."
+            "Manages approval decisions in the human-in-the-loop workflow. "
+            "Reviews pending items, approves/rejects/requests edits, and "
+            "provides approval visibility and history."
         ),
-        tool_name="call_review_queue",
+        tool_name="call_approver",
         arg_description=(
-            "The action to perform — e.g. 'Queue this post for review: ...', "
-            "'Check status of post ID abc123', 'Get all pending reviews'."
+            "The approval action to perform — e.g. 'Approve item <id>', "
+            "'Reject item <id>', 'Show pending items', 'View approval history'."
         ),
     ),
 
