@@ -20,24 +20,13 @@ class BaseAgent(ABC):
     Subclasses must set `agent_id` and optionally override `_build_tools()`.
 
     The prompt is loaded automatically from `prompt.md` in the subclass's directory.
-
-    Pass `child_agents` to give this agent the ability to delegate work to
-    other agents via their ``as_tool()`` wrappers.
     """
 
     agent_id: Agent
 
-    def __init__(
-        self,
-        chat_client: AzureOpenAIResponsesClient,
-        child_agents: list["BaseAgent"] | None = None,
-    ) -> None:
+    def __init__(self, chat_client: AzureOpenAIResponsesClient) -> None:
         self._chat_client = chat_client
-        self._child_agents = child_agents or []
         entry = AGENT_REGISTRY[self.agent_id]
-
-        # Own tools + child-agent tool wrappers
-        tools = self._build_tools() + [c.as_tool() for c in self._child_agents]
 
         self._agent = ChatAgent(
             chat_client=chat_client,
@@ -45,7 +34,7 @@ class BaseAgent(ABC):
             id=self.agent_id.value,
             name=entry.name,
             description=entry.description,
-            tools=tools,
+            tools=self._build_tools(),
         )
 
     def _load_prompt(self) -> str:

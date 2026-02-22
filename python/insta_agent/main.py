@@ -37,6 +37,7 @@ import uvicorn
 from shared.config.settings import settings
 from shared.account_profile import load_all_profiles
 from agents.account.agent import InstaAccountAgent
+from agents.account.workflow import build_content_pipeline
 from agents.trend_scout.agent import TrendScoutAgent
 from agents.content_strategist.agent import ContentStrategistAgent
 from agents.media_generator.agent import MediaGeneratorAgent
@@ -106,15 +107,32 @@ def main():
         return
 
     account_agents: list[InstaAccountAgent] = []
+    pipeline_agents = []
+
     for name, profile in profiles.items():
+        # Account agent — conversational persona with specialist tools
         agent = InstaAccountAgent(ai_client, profile, child_agents=specialist_agents)
         account_agents.append(agent)
 
+        # Content pipeline — MAF sequential workflow with HIL before publishing
+        pipeline = build_content_pipeline(
+            specialist_agents,
+            account_name=profile.account_name,
+            display_name=profile.display_name,
+        )
+        pipeline_agents.append(pipeline)
+
     logger.info(f"Created {len(account_agents)} account agent(s): {[a.profile.display_name for a in account_agents]}")
+    logger.info(f"Created {len(pipeline_agents)} content pipeline(s)")
 
     # --- Build and start server ---
+    all_entities = (
+        [a.agent for a in account_agents]   # Account persona agents
+        + pipeline_agents                    # Content pipeline workflows
+        + [s.agent for s in specialist_agents]  # Individual specialist agents
+    )
     server = DevServer(port=settings.PORT, host="127.0.0.1", ui_enabled=True)
-    server.register_entities([a.agent for a in account_agents])
+    server.register_entities(all_entities)
 
     url = f"http://127.0.0.1:{settings.PORT}"
     logger.info(f"ForgeLens DevUI: {url}")

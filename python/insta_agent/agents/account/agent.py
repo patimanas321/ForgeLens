@@ -1,11 +1,14 @@
 """
 InstaAccountAgent — a self-contained Instagram account agent.
 
-Each instance manages one Instagram persona. It can ideate content,
-generate media, write captions, queue for human review, and publish.
+Each instance manages one Instagram persona.  It delegates work to
+specialist child agents (Trend Scout, Content Strategist, Media Generator,
+Copywriter, Review Queue, Publisher) rather than owning tools directly.
 
 Created dynamically from account profile JSON files in data/accounts/.
 """
+
+from __future__ import annotations
 
 import logging
 from pathlib import Path
@@ -15,7 +18,6 @@ from agent_framework.azure import AzureOpenAIResponsesClient
 
 from shared.account_profile import AccountProfile
 from shared.base_agent import BaseAgent
-from .tools import build_account_tools
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +38,9 @@ class InstaAccountAgent:
         self._child_agents = child_agents or []
 
         prompt = self._render_prompt()
-        # Own account-scoped tools + specialist child-agent tool wrappers
-        tools = build_account_tools(profile) + [c.as_tool() for c in self._child_agents]
+
+        # Specialist child agents exposed as callable tools
+        tools = [c.as_tool() for c in self._child_agents]
 
         self._agent = ChatAgent(
             chat_client=chat_client,
@@ -49,7 +52,10 @@ class InstaAccountAgent:
             tools=tools,
         )
 
-        logger.info(f"[account] Created agent: {profile.display_name} ({profile.account_name}) with {len(tools)} tools")
+        logger.info(
+            f"[account] Created agent: {profile.display_name} "
+            f"({profile.account_name}) with {len(tools)} specialist tools"
+        )
 
     def _render_prompt(self) -> str:
         """Render the prompt template with account-specific values."""
