@@ -1,12 +1,13 @@
 """
-InstaAgent — Multi-agent Instagram automation system.
+ForgeLens — Per-account Instagram automation agents.
 
-Entry point: wires up all agents, creates the orchestrator, and starts the MAF DevServer.
+Entry point: discovers account profiles from data/accounts/*.json,
+creates one InstaAccountAgent per profile, and starts the MAF DevServer.
 
 Usage:
     python main.py
     → Opens DevUI at http://127.0.0.1:8080
-    → Select "Orchestrator" to start the daily content pipeline
+    → Each Instagram account appears as its own agent
 """
 
 import os
@@ -34,7 +35,8 @@ from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 import uvicorn
 
 from shared.config.settings import settings
-from agents.orchestrator.agent import OrchestratorAgent
+from shared.account_profile import load_all_profiles
+from agents.account.agent import InstaAccountAgent
 from agents.trend_scout.agent import TrendScoutAgent
 from agents.content_strategist.agent import ContentStrategistAgent
 from agents.media_generator.agent import MediaGeneratorAgent
@@ -42,23 +44,22 @@ from agents.copywriter.agent import CopywriterAgent
 from agents.review_queue.agent import ReviewQueueAgent
 from agents.publisher.agent import PublisherAgent
 from shared.services.media_metadata_service import ensure_cosmos_resources
+from shared.services.review_queue_service import ensure_servicebus_queues
 
 # --- Logging ---
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
-logger = logging.getLogger("insta_agent")
+logger = logging.getLogger("forgelens")
 
 
 def main():
-    logger.info("Starting InstaAgent multi-agent system...")
+    logger.info("Starting ForgeLens...")
 
     # --- Ensure Cosmos DB database + container exist ---
     if settings.COSMOS_ENDPOINT:
         asyncio.run(ensure_cosmos_resources())
-        # Reset the cached Cosmos client — asyncio.run() used a temporary event loop
-        # that is now closed. The client will be lazily recreated on uvicorn's loop.
         from shared.services import media_metadata_service
         media_metadata_service._client = None
         media_metadata_service._credential = None
@@ -66,14 +67,19 @@ def main():
     else:
         logger.warning("COSMOS_ENDPOINT not set — media metadata will NOT be persisted")
 
-    # --- Azure OpenAI clients (two-tier: strong + lite) ---
+    # --- Ensure Service Bus queues exist ---
+    if settings.SERVICEBUS_NAMESPACE:
+        asyncio.run(ensure_servicebus_queues())
+        logger.info("Service Bus queues verified")
+    else:
+        logger.warning("SERVICEBUS_NAMESPACE not set — review queue will not work")
+
+    # --- Azure OpenAI client ---
     credential = DefaultAzureCredential(managed_identity_client_id=settings.AZURE_CLIENT_ID)
     token_provider = get_bearer_token_provider(
         credential, "https://cognitiveservices.azure.com/.default"
     )
 
-    # Single Azure OpenAI client — all agents share the same deployment
-    # base_url overrides the SDK's hardcoded /openai/v1/ path — the Responses API lives at /openai/
     base_url = f"{settings.AZURE_OPENAI_ENDPOINT}/openai/"
     ai_client = AzureOpenAIResponsesClient(
         base_url=base_url,
@@ -82,48 +88,38 @@ def main():
         api_version=settings.AZURE_OPENAI_API_VERSION,
     )
 
-    # --- Create specialist agents ---
-    trend_scout = TrendScoutAgent(ai_client)
-    content_strategist = ContentStrategistAgent(ai_client)
-    media_generator = MediaGeneratorAgent(ai_client)
-    copywriter = CopywriterAgent(ai_client)
-    review_queue = ReviewQueueAgent(ai_client)
-    publisher = PublisherAgent(ai_client)
+    # --- Create specialist agents (shared across all accounts) ---
+    specialist_agents = [
+        TrendScoutAgent(ai_client),
+        ContentStrategistAgent(ai_client),
+        MediaGeneratorAgent(ai_client),
+        CopywriterAgent(ai_client),
+        ReviewQueueAgent(ai_client),
+        PublisherAgent(ai_client),
+    ]
+    logger.info(f"Created {len(specialist_agents)} specialist agent(s)")
 
-    logger.info(f"Specialist agents created (deployment: {settings.AZURE_OPENAI_DEPLOYMENT})")
+    # --- Discover account profiles and create one agent per account ---
+    profiles = load_all_profiles()
+    if not profiles:
+        logger.error("No account profiles found in data/accounts/*.json — nothing to start")
+        return
 
-    # --- Create orchestrator (wraps all specialists as tools) ---
-    orchestrator = OrchestratorAgent(
-        ai_client,
-        child_agents=[
-            trend_scout,
-            content_strategist,
-            media_generator,
-            copywriter,
-            review_queue,
-            publisher,
-        ],
-    )
-    logger.info("Orchestrator created with 6 specialist agents as tools")
+    account_agents: list[InstaAccountAgent] = []
+    for name, profile in profiles.items():
+        agent = InstaAccountAgent(ai_client, profile, child_agents=specialist_agents)
+        account_agents.append(agent)
+
+    logger.info(f"Created {len(account_agents)} account agent(s): {[a.profile.display_name for a in account_agents]}")
 
     # --- Build and start server ---
     server = DevServer(port=settings.PORT, host="127.0.0.1", ui_enabled=True)
-    server.register_entities([
-        orchestrator.agent,
-        trend_scout.agent,
-        content_strategist.agent,
-        media_generator.agent,
-        copywriter.agent,
-        review_queue.agent,
-        publisher.agent,
-    ])
+    server.register_entities([a.agent for a in account_agents])
 
     url = f"http://127.0.0.1:{settings.PORT}"
-    logger.info(f"InstaAgent DevUI: {url}")
-    logger.info("Select 'Orchestrator' in the UI to start the daily content pipeline")
-    logger.info("Or select individual agents to test them directly")
+    logger.info(f"ForgeLens DevUI: {url}")
+    logger.info("Select an account in the UI to start creating content")
 
-    # Auto-open browser after a short delay (gives uvicorn time to bind)
     threading.Timer(1.5, webbrowser.open, args=[url]).start()
 
     uvicorn.run(server.get_app(), host="127.0.0.1", port=settings.PORT)

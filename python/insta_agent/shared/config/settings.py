@@ -94,6 +94,9 @@ class Settings:
     COSMOS_DATABASE: str = os.environ.get("COSMOS_DATABASE", "insta-agent")
     COSMOS_CONTAINER: str = os.environ.get("COSMOS_CONTAINER", "media-metadata")
 
+    # --- Azure Service Bus (Review Queue) ---
+    SERVICEBUS_NAMESPACE: str = os.environ.get("SERVICEBUS_NAMESPACE", "forgelens-bus.servicebus.windows.net")
+
     # --- Azure Communication Services (Email Notifications) ---
     ACS_ENDPOINT: str = os.environ.get("ACS_ENDPOINT", "https://forgelens-acs.unitedstates.communication.azure.com")
     ACS_CONNECTION_STRING: str = os.environ.get("ACS_CONNECTION_STRING", "")
