@@ -17,6 +17,7 @@ Every generated asset is:
 
 import logging
 import uuid
+import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -28,11 +29,12 @@ from pydantic import BaseModel, Field
 
 from shared.config.settings import settings
 from shared.services.blob_storage_service import upload_blob
-from shared.services.media_metadata_service import save_media_metadata
+from shared.services.media_metadata_service import save_media_metadata, update_content, get_content_by_id
 from shared.services.review_queue_service import ReviewQueueService
 
 logger = logging.getLogger(__name__)
 _review_queue = ReviewQueueService()
+_generation_jobs: dict[str, dict] = {}
 
 # Local media storage for MVP (swap for Azure Blob Storage in production)
 MEDIA_DIR = Path(__file__).parent.parent.parent / "data" / "media"
@@ -139,6 +141,34 @@ class RefineCaptionInput(BaseModel):
     feedback: str = Field(..., description="What to change or improve (e.g. 'make it funnier', 'shorter', 'add a question').")
 
 
+class NotifyGenerationInput(BaseModel):
+    content_id: str = Field(..., description="The generated content ID.")
+    media_url: str = Field(..., description="Public URL of generated media.")
+    topic: str = Field(default="Generated post", description="Topic/summary for the review item.")
+    content_type: str = Field(default="image", description="image, video, reel, carousel, story")
+    caption: str = Field(default="", description="Optional caption preview.")
+    hashtags: str = Field(default="", description="Optional hashtag string.")
+    post_type: str = Field(default="post", description="post, reel, carousel")
+    target_account_id: str = Field(default="", description="Optional target Instagram account ID.")
+
+
+class SubmitGenerationJobInput(BaseModel):
+    prompt: str = Field(..., description="Prompt for image/video generation.")
+    job_type: str = Field(default="image", description="image or video")
+    topic: str = Field(default="Generated post", description="Topic/summary used in metadata.")
+    post_type: str = Field(default="post", description="post, reel, carousel")
+    target_account_id: str = Field(default="", description="Optional target Instagram account ID.")
+    aspect_ratio: str = Field(default="1:1", description="Aspect ratio for generated media.")
+    resolution: str = Field(default="1K", description="Image resolution (images only).")
+    output_format: str = Field(default="png", description="Image output format (images only).")
+    duration: int = Field(default=5, ge=3, le=15, description="Video duration in seconds (videos only).")
+    video_model: str = Field(default="", description="Video model hint: kling/sora/full fal id (videos only).")
+
+
+class CheckGenerationStatusInput(BaseModel):
+    job_id: str = Field(..., description="Generation job id returned by submit_generation_job.")
+
+
 # ------------------------------------------------------------------
 # Helper — download fal.ai output to local disk
 # ------------------------------------------------------------------
@@ -167,6 +197,199 @@ def _resolve_video_model(model_hint: str) -> str:
     if hint.startswith("fal-ai/"):
         return hint
     return settings.FAL_VIDEO_MODEL
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+async def _mark_job_status(
+    content_id: str,
+    *,
+    status: str,
+    error: str = "",
+    extra_updates: dict | None = None,
+) -> None:
+    updates = {
+        "generation_status": status,
+        "generation_error": error,
+        "generation_updated_at": _now_iso(),
+    }
+    if status == "completed":
+        updates["generation_completed_at"] = _now_iso()
+    if status == "failed":
+        updates["generation_failed_at"] = _now_iso()
+    if extra_updates:
+        updates.update(extra_updates)
+    await update_content(content_id, updates)
+
+
+async def _execute_image_job(
+    *,
+    content_id: str,
+    prompt: str,
+    aspect_ratio: str,
+    resolution: str,
+    output_format: str,
+    topic: str,
+) -> dict:
+    model_id = settings.FAL_IMAGE_MODEL
+    result = await fal_client.subscribe_async(
+        model_id,
+        arguments={
+            "prompt": prompt,
+            "num_images": 1,
+            "aspect_ratio": aspect_ratio,
+            "output_format": output_format,
+            "resolution": resolution,
+            "safety_tolerance": "4",
+        },
+    )
+
+    image_data = result["images"][0]
+    image_url = image_data["url"]
+    file_path = await _download_to_local(image_url, output_format)
+    blob_info = await upload_blob(file_path)
+    blob_url = blob_info["blob_url"]
+
+    await _mark_job_status(
+        content_id,
+        status="completed",
+        extra_updates={
+            "media_type": "image",
+            "post_type": "post",
+            "blob_url": blob_url,
+            "blob_name": blob_info["blob_name"],
+            "model": model_id,
+            "aspect_ratio": aspect_ratio,
+            "resolution": resolution,
+            "width": image_data.get("width"),
+            "height": image_data.get("height"),
+            "file_size_bytes": blob_info["file_size_bytes"],
+            "fal_url": image_url,
+            "description": result.get("description", "") or topic,
+            "queue_status": "not_queued",
+        },
+    )
+
+    return {
+        "content_id": content_id,
+        "media_type": "image",
+        "blob_url": blob_url,
+        "prompt_used": prompt,
+        "model": model_id,
+    }
+
+
+async def _execute_video_job(
+    *,
+    content_id: str,
+    prompt: str,
+    aspect_ratio: str,
+    duration: int,
+    video_model: str,
+    topic: str,
+) -> dict:
+    model_id = _resolve_video_model(video_model)
+    is_sora = "sora" in model_id
+    is_kling = "kling" in model_id
+
+    if is_sora:
+        sora_duration = min([d for d in [4, 8, 12] if d >= duration], default=12)
+        sora_aspect = aspect_ratio if aspect_ratio in ("9:16", "16:9") else "9:16"
+        arguments = {
+            "prompt": prompt,
+            "duration": str(sora_duration),
+            "aspect_ratio": sora_aspect,
+            "resolution": "720p",
+            "delete_video": False,
+        }
+    elif is_kling:
+        kling_duration = max(3, min(duration, 15))
+        kling_aspect = aspect_ratio if aspect_ratio in ("9:16", "16:9", "1:1") else "9:16"
+        arguments = {
+            "prompt": prompt,
+            "duration": str(kling_duration),
+            "aspect_ratio": kling_aspect,
+            "negative_prompt": "blur, distort, and low quality",
+            "generate_audio": True,
+        }
+    else:
+        arguments = {
+            "prompt": prompt,
+            "duration": str(duration),
+            "aspect_ratio": aspect_ratio,
+        }
+
+    result = await fal_client.subscribe_async(model_id, arguments=arguments)
+    video_data = result["video"]
+    video_url = video_data["url"]
+    file_path = await _download_to_local(video_url, "mp4")
+    blob_info = await upload_blob(file_path)
+    blob_url = blob_info["blob_url"]
+
+    await _mark_job_status(
+        content_id,
+        status="completed",
+        extra_updates={
+            "media_type": "video",
+            "post_type": "reel",
+            "blob_url": blob_url,
+            "blob_name": blob_info["blob_name"],
+            "model": model_id,
+            "aspect_ratio": aspect_ratio,
+            "duration_seconds": duration,
+            "file_size_bytes": blob_info["file_size_bytes"],
+            "fal_url": video_url,
+            "description": topic,
+            "queue_status": "not_queued",
+        },
+    )
+
+    return {
+        "content_id": content_id,
+        "media_type": "video",
+        "blob_url": blob_url,
+        "prompt_used": prompt,
+        "model": model_id,
+    }
+
+
+async def _run_generation_job(job_id: str) -> None:
+    job = _generation_jobs[job_id]
+    content_id = job["content_id"]
+    await _mark_job_status(content_id, status="running")
+    _generation_jobs[job_id]["status"] = "running"
+
+    try:
+        if job["job_type"] == "video":
+            result = await _execute_video_job(
+                content_id=content_id,
+                prompt=job["prompt"],
+                aspect_ratio=job["aspect_ratio"],
+                duration=job["duration"],
+                video_model=job["video_model"],
+                topic=job["topic"],
+            )
+        else:
+            result = await _execute_image_job(
+                content_id=content_id,
+                prompt=job["prompt"],
+                aspect_ratio=job["aspect_ratio"],
+                resolution=job["resolution"],
+                output_format=job["output_format"],
+                topic=job["topic"],
+            )
+
+        _generation_jobs[job_id]["status"] = "completed"
+        _generation_jobs[job_id]["result"] = result
+        _generation_jobs[job_id]["completed_at"] = _now_iso()
+    except Exception as e:
+        error = str(e)
+        _generation_jobs[job_id]["status"] = "failed"
+        _generation_jobs[job_id]["error"] = error
+        _generation_jobs[job_id]["completed_at"] = _now_iso()
+        await _mark_job_status(content_id, status="failed", error=error)
 
 
 # ------------------------------------------------------------------
@@ -230,18 +453,6 @@ async def generate_image(
             extra={"source": "insta_post_generator"},
         )
 
-        await _review_queue.queue_for_review(
-            content_id=doc["id"],
-            media_url=blob_url,
-            caption="",
-            hashtags="",
-            content_type="image",
-            post_type="post",
-            target_account_id=settings.INSTAGRAM_BUSINESS_ACCOUNT_ID,
-            topic=result.get("description", "") or "Generated image",
-            trend_source="insta_post_generator",
-        )
-
         logger.info(f"[OK] Generated image via Nano Banana Pro: {file_path} → {blob_url}")
         return {
             "status": "success",
@@ -252,7 +463,7 @@ async def generate_image(
             "cosmos_id": doc["id"],
             "content_id": doc["id"],
             "approval_status": "pending",
-            "queue_status": "queued",
+            "queue_status": "not_queued",
             "prompt_used": prompt,
             "description": result.get("description", ""),
             "aspect_ratio": aspect_ratio,
@@ -346,18 +557,6 @@ async def generate_video(
             extra={"source": "insta_post_generator"},
         )
 
-        await _review_queue.queue_for_review(
-            content_id=doc["id"],
-            media_url=blob_url,
-            caption="",
-            hashtags="",
-            content_type="video",
-            post_type="reel",
-            target_account_id=settings.INSTAGRAM_BUSINESS_ACCOUNT_ID,
-            topic="Generated reel",
-            trend_source="insta_post_generator",
-        )
-
         logger.info(f"[OK] Generated video via {model_id}: {file_path} → {blob_url}")
         return {
             "status": "success",
@@ -368,7 +567,7 @@ async def generate_video(
             "cosmos_id": doc["id"],
             "content_id": doc["id"],
             "approval_status": "pending",
-            "queue_status": "queued",
+            "queue_status": "not_queued",
             "prompt_used": prompt,
             "duration_seconds": duration,
             "aspect_ratio": aspect_ratio,
@@ -480,6 +679,128 @@ async def refine_caption(original_caption: str, feedback: str) -> dict:
     }
 
 
+async def notify_generation(
+    content_id: str,
+    media_url: str,
+    topic: str = "Generated post",
+    content_type: str = "image",
+    caption: str = "",
+    hashtags: str = "",
+    post_type: str = "post",
+    target_account_id: str = "",
+) -> dict:
+    """Mark generation complete by queueing item for approval (no external messaging)."""
+    queued = await _review_queue.queue_for_review(
+        content_id=content_id,
+        media_url=media_url,
+        caption=caption,
+        hashtags=hashtags,
+        content_type=content_type,
+        post_type=post_type,
+        target_account_id=target_account_id or settings.INSTAGRAM_BUSINESS_ACCOUNT_ID,
+        topic=topic,
+        trend_source="insta_post_generator",
+    )
+    return {
+        "status": "queued_for_review",
+        "content_id": content_id,
+        "topic": topic,
+        "content_type": content_type,
+        "review_item": queued,
+    }
+
+
+async def submit_generation_job(
+    prompt: str,
+    job_type: str = "image",
+    topic: str = "Generated post",
+    post_type: str = "post",
+    target_account_id: str = "",
+    aspect_ratio: str = "1:1",
+    resolution: str = "1K",
+    output_format: str = "png",
+    duration: int = 5,
+    video_model: str = "",
+) -> dict:
+    normalized_type = (job_type or "image").strip().lower()
+    if normalized_type not in {"image", "video"}:
+        return {"status": "error", "error": "job_type must be 'image' or 'video'"}
+
+    job_id = uuid.uuid4().hex
+    content = await save_media_metadata(
+        media_type="video" if normalized_type == "video" else "image",
+        blob_url="",
+        blob_name="",
+        prompt=prompt,
+        model=(settings.FAL_VIDEO_MODEL if normalized_type == "video" else settings.FAL_IMAGE_MODEL),
+        aspect_ratio=aspect_ratio,
+        resolution=("" if normalized_type == "video" else resolution),
+        duration_seconds=(duration if normalized_type == "video" else None),
+        fal_url="",
+        post_type=(post_type or ("reel" if normalized_type == "video" else "post")),
+        target_account_id=target_account_id or settings.INSTAGRAM_BUSINESS_ACCOUNT_ID,
+        description=topic,
+        approval_status="pending",
+        publish_status="pending",
+        extra={
+            "generation_job_id": job_id,
+            "generation_status": "submitted",
+            "generation_requested_at": _now_iso(),
+            "queue_status": "not_queued",
+            "source": "insta_post_generator",
+        },
+    )
+
+    _generation_jobs[job_id] = {
+        "job_id": job_id,
+        "content_id": content["id"],
+        "job_type": normalized_type,
+        "prompt": prompt,
+        "topic": topic,
+        "aspect_ratio": aspect_ratio,
+        "resolution": resolution,
+        "output_format": output_format,
+        "duration": duration,
+        "video_model": video_model,
+        "status": "submitted",
+        "submitted_at": _now_iso(),
+        "result": None,
+        "error": "",
+    }
+
+    _generation_jobs[job_id]["task"] = asyncio.create_task(_run_generation_job(job_id))
+
+    return {
+        "status": "submitted",
+        "job_id": job_id,
+        "content_id": content["id"],
+        "job_type": normalized_type,
+    }
+
+
+async def check_generation_status(job_id: str) -> dict:
+    job = _generation_jobs.get(job_id)
+    if not job:
+        return {"status": "error", "error": f"Job {job_id} not found"}
+
+    response = {
+        "job_id": job_id,
+        "content_id": job.get("content_id", ""),
+        "job_type": job.get("job_type", ""),
+        "status": job.get("status", "unknown"),
+        "submitted_at": job.get("submitted_at"),
+    }
+
+    if job.get("status") == "completed":
+        record = await get_content_by_id(job.get("content_id", ""))
+        response["result"] = job.get("result")
+        response["content"] = record
+    elif job.get("status") == "failed":
+        response["error"] = job.get("error", "Generation failed")
+
+    return response
+
+
 # ------------------------------------------------------------------
 # Build tools list
 # ------------------------------------------------------------------
@@ -536,5 +857,23 @@ def build_insta_post_generator_tools() -> list[FunctionTool]:
             description="Rewrite/improve an existing caption based on feedback from human review.",
             input_model=RefineCaptionInput,
             func=refine_caption,
+        ),
+        FunctionTool(
+            name="notify_generation",
+            description="Mark post generation complete by queueing the item for review (updates DB review fields and creates pending review queue message).",
+            input_model=NotifyGenerationInput,
+            func=notify_generation,
+        ),
+        FunctionTool(
+            name="submit_generation_job",
+            description="Submit an async media generation job, create a DB draft record, and store generation_job_id/status in DB.",
+            input_model=SubmitGenerationJobInput,
+            func=submit_generation_job,
+        ),
+        FunctionTool(
+            name="check_generation_status",
+            description="Check status for a previously submitted generation job by job_id.",
+            input_model=CheckGenerationStatusInput,
+            func=check_generation_status,
         ),
     ]
