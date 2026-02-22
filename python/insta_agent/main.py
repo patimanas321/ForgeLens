@@ -40,7 +40,7 @@ from agents.account.agent import InstaAccountAgent
 from agents.account.workflow import build_content_pipeline
 from agents.trend_scout.agent import TrendScoutAgent
 from agents.media_generator.agent import MediaGeneratorAgent
-from agents.review_queue.agent import ReviewQueueAgent
+from agents.approver.agent import ReviewQueueAgent
 from agents.publisher.agent import PublisherAgent
 from shared.services.media_metadata_service import ensure_cosmos_resources
 from shared.services.review_queue_service import ensure_servicebus_queues
@@ -90,7 +90,7 @@ def main():
     # --- Create delegable specialist agents (shared across all accounts) ---
     trend_scout_agent = TrendScoutAgent(ai_client)
     media_generator_agent = MediaGeneratorAgent(ai_client)
-    review_queue_agent = ReviewQueueAgent(ai_client)
+    approver_agent = ReviewQueueAgent(ai_client)
 
     # Publisher is standalone: queue listener + content_id publisher
     publisher_agent = PublisherAgent(ai_client)
@@ -135,7 +135,7 @@ def main():
         + [
             trend_scout_agent.agent,
             media_generator_agent.agent,
-            review_queue_agent.agent,
+            approver_agent.agent,
         ]
         + [publisher_agent.agent]            # Standalone publisher agent
     )
