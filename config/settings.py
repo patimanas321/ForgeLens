@@ -26,7 +26,7 @@ class Settings:
     # --- fal.ai Media Generation (secret from KV) ---
     @property
     def FAL_KEY(self) -> str:
-        from shared.config.keyvault import kv
+        from config.keyvault import kv
         return kv.get("fal-key") or ""
 
     FAL_IMAGE_MODEL: str = os.environ.get("FAL_IMAGE_MODEL", "fal-ai/nano-banana-pro")
@@ -36,20 +36,20 @@ class Settings:
     # --- Instagram Graph API (secrets from KV) ---
     @property
     def INSTAGRAM_ACCESS_TOKEN(self) -> str:
-        from shared.config.keyvault import kv
+        from config.keyvault import kv
         return kv.get("instagram-access-token") or ""
 
     @property
     def INSTAGRAM_BUSINESS_ACCOUNT_ID(self) -> str:
         """Default account ID — first one discovered in KV, or env var fallback."""
-        from shared.config.keyvault import kv
+        from config.keyvault import kv
         _, account_id = kv.default_instagram_account
         return account_id or os.environ.get("INSTAGRAM_BUSINESS_ACCOUNT_ID", "")
 
     @property
     def INSTAGRAM_ACCOUNTS(self) -> dict[str, str]:
         """All IG accounts: {name: account_id}. For multi-account publishing."""
-        from shared.config.keyvault import kv
+        from config.keyvault import kv
         accounts = kv.instagram_accounts
         # Fallback: if KV has nothing, use the single env var
         if not accounts:
@@ -61,7 +61,7 @@ class Settings:
     # --- Web Search / Tavily (secret from KV) ---
     @property
     def TAVILY_API_KEY(self) -> str:
-        from shared.config.keyvault import kv
+        from config.keyvault import kv
         return kv.get("tavily-api-key") or ""
 
     @property

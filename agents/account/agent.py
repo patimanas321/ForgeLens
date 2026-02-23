@@ -16,10 +16,10 @@ from pathlib import Path
 from agent_framework import ChatAgent
 from agent_framework.azure import AzureOpenAIResponsesClient
 
-from shared.account_profile import AccountProfile
-from shared.config.settings import settings
-from shared.base_agent import BaseAgent
-from .internal_tools import build_account_internal_tools
+from account_profile import AccountProfile
+from config.settings import settings
+from base_agent import BaseAgent
+from .tools import build_account_tools
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +42,8 @@ class InstaAccountAgent:
         prompt = self._render_prompt()
 
         account_id = settings.INSTAGRAM_ACCOUNTS.get(profile.account_name, "")
-        own_tools = build_account_internal_tools(
-            account_name=profile.account_name,
+        own_tools = build_account_tools(
+            profile,
             target_account_id=account_id,
             frequency_targets=profile.content_rules.content_type_frequency,
         )

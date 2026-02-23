@@ -11,14 +11,14 @@ import logging
 from agent_framework import FunctionTool
 from pydantic import BaseModel, Field
 
-from shared.config.settings import settings
-from shared.services.instagram_service import InstagramService
-from shared.services.media_metadata_service import (
+from config.settings import settings
+from services.instagram_service import InstagramService
+from services.media_metadata_service import (
     get_content_by_id,
     mark_content_published,
     query_content,
 )
-from shared.services.review_queue_service import ReviewQueueService
+from services.review_queue_service import ReviewQueueService
 
 logger = logging.getLogger(__name__)
 

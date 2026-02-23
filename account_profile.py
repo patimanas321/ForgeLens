@@ -17,7 +17,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-ACCOUNTS_DIR = Path(__file__).parent.parent / "insta_profiles"
+ACCOUNTS_DIR = Path(__file__).parent / "insta_profiles"
 
 
 @dataclass

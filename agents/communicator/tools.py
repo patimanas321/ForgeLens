@@ -7,9 +7,9 @@ from datetime import datetime, timezone
 from agent_framework import FunctionTool
 from pydantic import BaseModel, Field
 
-from shared.services.media_metadata_service import get_content_by_id, update_content
-from shared.services.notification_service import NotificationService
-from shared.services.review_queue_service import ReviewQueueService
+from services.media_metadata_service import get_content_by_id, update_content
+from services.notification_service import NotificationService
+from services.review_queue_service import ReviewQueueService
 
 _notification_service = NotificationService()
 _queue_service = ReviewQueueService()

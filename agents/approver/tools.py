@@ -6,8 +6,8 @@ import logging
 from agent_framework import FunctionTool
 from pydantic import BaseModel, Field
 
-from shared.services.review_queue_service import ReviewQueueService
-from shared.services.media_metadata_service import query_content
+from services.review_queue_service import ReviewQueueService
+from services.media_metadata_service import query_content
 
 logger = logging.getLogger(__name__)
 

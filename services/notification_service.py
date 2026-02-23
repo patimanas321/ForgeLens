@@ -11,7 +11,7 @@ import asyncio
 import logging
 from azure.communication.email import EmailClient
 from azure.identity import DefaultAzureCredential
-from shared.config.settings import settings
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 

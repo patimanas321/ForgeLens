@@ -15,7 +15,7 @@ from azure.identity.aio import DefaultAzureCredential
 from azure.storage.blob import ContentSettings
 from azure.storage.blob.aio import BlobServiceClient as AsyncBlobServiceClient
 
-from shared.config.settings import settings
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 

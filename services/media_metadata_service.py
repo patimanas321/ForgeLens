@@ -15,7 +15,7 @@ from typing import Any
 from azure.cosmos.aio import CosmosClient
 from azure.identity.aio import DefaultAzureCredential
 
-from shared.config.settings import settings
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +160,21 @@ async def update_content(content_id: str, updates: dict[str, Any]) -> dict | Non
     item.update(updates)
     updated = await container.replace_item(item=item["id"], body=item)
     return updated
+
+
+async def delete_media_metadata(content_id: str, media_type: str) -> bool:
+    """Delete a media metadata document by id + partition key.
+
+    Returns True if deleted, False if not found.
+    """
+    container = await _get_container()
+    try:
+        await container.delete_item(item=content_id, partition_key=media_type)
+        logger.info("[cosmos] Deleted metadata id=%s", content_id)
+        return True
+    except Exception:
+        logger.warning("[cosmos] Could not delete id=%s (not found?)", content_id)
+        return False
 
 
 async def set_approval_status(

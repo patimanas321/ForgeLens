@@ -36,10 +36,10 @@
         "posting_cadence": "1-2 posts per day",
         "content_type_frequency": {
             "image": "3 per week",
-            "carousel": "2 per week",
-            "reel": "5 per week"
+            "carousel": "0",
+            "reel": "0"
         },
-        "hashtag_count": { "min": 15, "max": 25 },
+        "hashtag_count": { "min": 5, "max": 15 },
         "caption_style": "First person from Oreo's perspective. Start with a hook that makes people stop scrolling. Casual luxury vibe. End with a question or playful CTA. Keep it short for reels, longer for carousels.",
         "visual_style": "Cinematic, warm tones. Golden retriever (Oreo) as the star — always in the scene. Celebrity encounters, exotic locations, luxury settings. Lifestyle/candid feel, like paparazzi shots but wholesome. Think 'if a golden retriever had a travel + celebrity blog'."
     },

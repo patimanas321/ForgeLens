@@ -1,7 +1,7 @@
 """Publisher agent — posts approved content to Instagram via Graph API."""
 
 from agent_registry import Agent
-from shared.base_agent import BaseAgent
+from base_agent import BaseAgent
 from .tools import build_publisher_tools
 
 

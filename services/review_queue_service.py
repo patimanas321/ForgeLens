@@ -17,8 +17,8 @@ from azure.identity.aio import DefaultAzureCredential
 from azure.servicebus import ServiceBusMessage
 from azure.servicebus.aio import ServiceBusClient
 
-from shared.config.settings import settings
-from shared.services.media_metadata_service import (
+from config.settings import settings
+from services.media_metadata_service import (
     get_content_by_id,
     mark_content_published,
     set_approval_status,

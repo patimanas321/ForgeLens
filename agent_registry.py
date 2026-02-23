@@ -13,8 +13,6 @@ class Agent(str, Enum):
     """Canonical agent identifiers — used as ChatAgent.id values."""
     ORCHESTRATOR = "orchestrator"
     TREND_SCOUT = "trend-scout"
-    CONTENT_STRATEGIST = "content-strategist"
-    INSTA_POST_GENERATOR = "insta-post-generator"
     COMMUNICATOR = "communicator"
     REVIEW_QUEUE = "review-queue"
     PUBLISHER = "publisher"
@@ -52,37 +50,6 @@ AGENT_REGISTRY: dict[Agent, AgentEntry] = {
         arg_description=(
             "What to search for — e.g. 'trending topics in tech this week', "
             "'competitor analysis for @account', 'viral reels in fitness niche'."
-        ),
-    ),
-
-    # ---- Content Strategist ----
-    Agent.CONTENT_STRATEGIST: AgentEntry(
-        name="Content Strategist",
-        description=(
-            "Plans the content calendar, selects the best topic from trends, "
-            "avoids repetition by checking posting history, and decides the "
-            "content format (image post, carousel, reel, story)."
-        ),
-        tool_name="call_content_strategist",
-        arg_description=(
-            "Trend data and context to plan content from — e.g. "
-            "'Here are today's top 5 trends: ... Pick the best one for our "
-            "fitness account and suggest a format.'"
-        ),
-    ),
-
-    # ---- Insta Post Generator ----
-    Agent.INSTA_POST_GENERATOR: AgentEntry(
-        name="Insta Post Generator",
-        description=(
-            "Generates Instagram-ready media and copy assets. "
-            "Creates images/videos, supports caption and hashtag tooling, "
-            "and returns generated asset metadata."
-        ),
-        tool_name="call_insta_post_generator",
-        arg_description=(
-            "A detailed post brief describing what to generate or write — "
-            "e.g. 'Generate a 9:16 reel about morning fitness and draft a caption.'"
         ),
     ),
 

@@ -1,7 +1,7 @@
 """Communicator agent — sends review reminders and notifications."""
 
 from agent_registry import Agent
-from shared.base_agent import BaseAgent
+from base_agent import BaseAgent
 from .tools import build_communicator_tools
 
 

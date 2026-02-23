@@ -29,17 +29,17 @@ from agent_framework.devui import DevServer
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 import uvicorn
 
-from shared.config.settings import settings
-from shared.account_profile import load_all_profiles
+from config.settings import settings
+from account_profile import load_all_profiles
 from agents.account.agent import InstaAccountAgent
 from agents.account.workflow import build_content_pipeline
 from agents.trend_scout.agent import TrendScoutAgent
-from agents.insta_post_generator.agent import InstaPostGeneratorAgent
 from agents.approver.agent import ReviewQueueAgent
 from agents.communicator.agent import CommunicatorAgent
 from agents.publisher.agent import PublisherAgent
-from shared.services.communicator_trigger_service import start_communicator_queue_trigger_worker
-from shared.services.publisher_trigger_service import start_publisher_queue_trigger_worker
+from services.communicator_trigger_service import start_communicator_queue_trigger_worker
+from services.publisher_trigger_service import start_publisher_queue_trigger_worker
+from services.media_generation_worker import start_media_generation_worker
 
 # --- Logging ---
 logging.basicConfig(
@@ -81,7 +81,6 @@ def main():
 
     # --- Create delegable specialist agents (shared across all accounts) ---
     trend_scout_agent = TrendScoutAgent(ai_client)
-    insta_post_generator_agent = InstaPostGeneratorAgent(ai_client)
     approver_agent = ReviewQueueAgent(ai_client)
     communicator_agent = CommunicatorAgent(ai_client)
 
@@ -104,16 +103,14 @@ def main():
             profile,
             child_agents=[
                 trend_scout_agent,
-                insta_post_generator_agent,
                 communicator_agent,
             ],
         )
         account_agents.append(agent)
 
-        # Content pipeline — MAF sequential workflow with HIL before publishing
+        # Content pipeline — MAF sequential workflow (trend scouting only)
         pipeline = build_content_pipeline(
             trend_scout=trend_scout_agent,
-            insta_post_generator=insta_post_generator_agent,
             account_name=profile.account_name,
             display_name=profile.display_name,
         )
@@ -122,7 +119,8 @@ def main():
     logger.info(f"Created {len(account_agents)} account agent(s): {[a.profile.display_name for a in account_agents]}")
     logger.info(f"Created {len(pipeline_agents)} content pipeline(s)")
 
-    if settings.SERVICEBUS_NAMESPACE:
+    if settings.SERVICEBUS_NAMESPACE and False:  # Disabled — enable to test queue triggers locally
+        start_media_generation_worker(poll_interval_seconds=15)
         start_communicator_queue_trigger_worker(
             poll_interval_seconds=20,
             communicator_agent=communicator_agent.agent,
@@ -138,7 +136,6 @@ def main():
         + pipeline_agents                    # Content pipeline workflows
         + [
             trend_scout_agent.agent,
-            insta_post_generator_agent.agent,
             communicator_agent.agent,
             approver_agent.agent,
         ]

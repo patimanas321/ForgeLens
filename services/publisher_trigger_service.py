@@ -7,8 +7,8 @@ import logging
 import threading
 from typing import Any
 
-from shared.services.media_metadata_service import get_content_by_id
-from shared.services.review_queue_service import ReviewQueueService
+from services.media_metadata_service import get_content_by_id
+from services.review_queue_service import ReviewQueueService
 
 logger = logging.getLogger(__name__)
 

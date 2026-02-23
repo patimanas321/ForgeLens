@@ -7,7 +7,7 @@ from agent_framework import FunctionTool
 from pydantic import BaseModel, Field
 from tavily import AsyncTavilyClient
 
-from shared.config.settings import settings
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 

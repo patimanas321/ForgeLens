@@ -5,8 +5,8 @@ Docs: https://developers.facebook.com/docs/instagram-platform/instagram-graph-ap
 """
 
 import logging
-from shared.config.settings import settings
-from shared.services import BaseService
+from config.settings import settings
+from services import BaseService
 
 logger = logging.getLogger(__name__)
 

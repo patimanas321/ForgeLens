@@ -1,33 +1,30 @@
 """
-Content Pipeline — MAF sequential workflow for content draft generation.
+Content Pipeline — MAF sequential workflow for trend discovery.
 
-Chains specialist agents in order:
-    Trend Scout → Insta Post Generator
+Runs the Trend Scout agent to discover trending topics.
+Media generation is handled separately by the background worker.
 """
 
 import logging
 
 from agent_framework import SequentialBuilder, WorkflowAgent
 
-from shared.base_agent import BaseAgent
+from base_agent import BaseAgent
 
 logger = logging.getLogger(__name__)
 
 
 def build_content_pipeline(
     trend_scout: BaseAgent,
-    insta_post_generator: BaseAgent,
     account_name: str,
     display_name: str,
 ) -> WorkflowAgent:
-    """Build a sequential content-creation workflow for trend + media generation."""
+    """Build a sequential content-discovery workflow for an account."""
 
-    # Sequential pipeline — generates content drafts for account-level queueing
     workflow = (
         SequentialBuilder()
         .participants([
             trend_scout.agent,
-            insta_post_generator.agent,
         ])
         .build()
     )
@@ -37,14 +34,14 @@ def build_content_pipeline(
         id=f"pipeline-{account_name}",
         name=f"{display_name} — Content Pipeline",
         description=(
-            f"End-to-end content creation pipeline for {display_name}. "
-            "Discovers trends → generates media drafts. "
-            "Queueing and approval are handled separately."
+            f"Content discovery pipeline for {display_name}. "
+            "Discovers trends via web search. "
+            "Media generation is handled by the background worker."
         ),
     )
 
     logger.info(
         f"[workflow] Built content pipeline for {display_name} "
-        f"(2 agents, trend + media generation)"
+        f"(1 agent, trend discovery)"
     )
     return pipeline_agent

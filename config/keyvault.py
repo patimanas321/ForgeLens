@@ -5,26 +5,20 @@ Reads secrets at startup and caches them in-process.
 Supports multi-account Instagram via 'instagram-account-*' naming convention.
 
 Usage:
-    from shared.config.keyvault import kv
+    from config.keyvault import kv
 
     token = kv.get("instagram-access-token")
     accounts = kv.instagram_accounts          # {"oreo": "17841448781212376", ...}
 """
 
 import logging
-import os
 
 from azure.identity import DefaultAzureCredential
 from azure.keyvault.secrets import SecretClient
 
-from shared.config.settings import settings
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
-
-# Key Vault URL — set in .env or environment
-_VAULT_URL = os.environ.get(
-    "AZURE_KEYVAULT_URL", "https://forgelens-kv.vault.azure.net/"
-)
 
 # Secrets we expect to find in KV
 _SECRET_NAMES = [
@@ -56,7 +50,7 @@ class KeyVaultStore:
 
         try:
             credential = DefaultAzureCredential(managed_identity_client_id=settings.AZURE_CLIENT_ID)
-            client = SecretClient(vault_url=_VAULT_URL, credential=credential)
+            client = SecretClient(vault_url=settings.AZURE_KEYVAULT_URL, credential=credential)
 
             # Load known secrets
             for name in _SECRET_NAMES:
@@ -108,5 +102,5 @@ class KeyVaultStore:
         return "", ""
 
 
-# Module-level singleton — import as `from shared.config.keyvault import kv`
+# Module-level singleton — import as `from config.keyvault import kv`
 kv = KeyVaultStore()
