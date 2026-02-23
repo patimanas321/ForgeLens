@@ -1,76 +1,8 @@
-# Build results
-[Dd]ebug/
-[Rr]elease/
-x64/
-x86/
-[Aa][Rr][Mm]/
-[Aa][Rr][Mm]64/
-bld/
-[Bb]in/
-[Oo]bj/
-[Ll]og/
-[Ll]ogs/
-
-# Visual Studio files
-.vs/
-*.suo
-*.user
-*.userosscache
-*.sln.docstates
-
-# Rider files
-.idea/
-
-# VS Code files (except launch configs)
-.vscode/*
-!.vscode/launch.json
-!.vscode/tasks.json
-
-# NuGet
-*.nupkg
-**/[Pp]ackages/*
-!**/packages/build/
-*.nuget.props
-*.nuget.targets
-project.lock.json
-
-# User-specific files
-*.rsuser
-*.suo
-*.user
-*.userosscache
-*.sln.docstates
-
-# Build outputs
-[Aa]rtifacts/
-artifacts/
-
-# Test Results
-[Tt]est[Rr]esult*/
-[Bb]uild[Ll]og.*
-
-# Environment files
 .env
-.env.local
-.env.*.local
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Generated images
-artifacts/images/*
-!artifacts/images/.gitkeep
-
-# Logs
-logs/
-
-# Temporary files
-*.tmp
-*.temp
-
-# Screenshots
-**/screenshots/
-
-# Node modules (for Playwright MCP)
-node_modules/
+__pycache__/
+*.pyc
+data/
+.venv/
+*.egg-info/
+dist/
+build/
