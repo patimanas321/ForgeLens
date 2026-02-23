@@ -6,6 +6,7 @@ to avoid repeating content.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 
 from agent_framework import FunctionTool
@@ -13,6 +14,8 @@ from pydantic import BaseModel, Field
 
 from shared.services.media_metadata_service import get_content_by_id, query_content
 from shared.services.review_queue_service import ReviewQueueService
+
+logger = logging.getLogger(__name__)
 
 
 class GetRecentPostHistoryInput(BaseModel):
@@ -75,11 +78,15 @@ def build_account_internal_tools(
     queue_service = ReviewQueueService(account_name=account_name)
 
     async def get_recent_post_history(limit: int = 20, content_type: str = "") -> dict:
-        items = await query_content(
-            publish_status="published",
-            target_account_id=target_account_id or None,
-            limit=max(limit * 3, 30),
-        )
+        try:
+            items = await query_content(
+                publish_status="published",
+                target_account_id=target_account_id or None,
+                limit=max(limit * 3, 30),
+            )
+        except Exception as e:
+            logger.warning("[account:%s] get_recent_post_history failed: %s", account_name, e)
+            return {"account": account_name, "count": 0, "items": [], "note": "No publishing history yet or DB unavailable."}
 
         normalized_type = (content_type or "").strip().lower()
         if normalized_type:
@@ -100,11 +107,22 @@ def build_account_internal_tools(
         }
 
     async def get_content_type_frequency(days: int = 30, limit: int = 200) -> dict:
-        items = await query_content(
-            publish_status="published",
-            target_account_id=target_account_id or None,
-            limit=limit,
-        )
+        try:
+            items = await query_content(
+                publish_status="published",
+                target_account_id=target_account_id or None,
+                limit=limit,
+            )
+        except Exception as e:
+            logger.warning("[account:%s] get_content_type_frequency failed: %s", account_name, e)
+            return {
+                "account": account_name,
+                "window_days": days,
+                "published_items_analyzed": 0,
+                "counts_by_type": {"post": 0, "reel": 0, "carousel": 0, "other": 0},
+                "frequency_targets": frequency_targets,
+                "note": "No publishing history yet or DB unavailable.",
+            }
 
         window_start = datetime.now(timezone.utc) - timedelta(days=days)
         counts = {"post": 0, "reel": 0, "carousel": 0, "other": 0}

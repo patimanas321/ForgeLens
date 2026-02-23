@@ -48,6 +48,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger("forgelens")
 
+# Silence noisy Azure SDK loggers
+for _noisy in (
+    "azure.servicebus",
+    "azure.core.pipeline.policies.http_logging_policy",
+    "azure.identity",
+    "azure.cosmos",
+    "azure.monitor",
+    "azure.servicebus._pyamqp",
+):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
+
 
 def main():
     logger.info("Starting ForgeLens...")
