@@ -1,8 +1,7 @@
-"""Tools for the Publisher agent — publish by content ID only.
+"""Tools for the Publisher agent — publish approved content + send confirmation email.
 
-Publisher never accepts raw media URLs/captions directly. It either:
-  1) Pulls approved work from the queue, or
-  2) Publishes a specific approved ``content_id`` from Cosmos DB.
+All reads come from Cosmos DB. No Service Bus peeking.
+After publishing, a confirmation email is sent via NotificationService.
 """
 
 import asyncio
@@ -18,11 +17,11 @@ from services.media_metadata_service import (
     mark_content_published,
     query_content,
 )
-from services.review_queue_service import ReviewQueueService
+from services.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
 
-_queue_service = ReviewQueueService()
+_notification_service = NotificationService()
 
 
 def _build_caption(record: dict) -> str:
@@ -50,12 +49,12 @@ def _get_ig_service(account_name: str = "") -> InstagramService:
     return InstagramService()
 
 
+# ---------------------------------------------------------------------------
+# Input schemas
+# ---------------------------------------------------------------------------
+
 class ListInstagramAccountsInput(BaseModel):
     pass
-
-
-class GetPendingApprovalsInput(BaseModel):
-    limit: int = Field(default=50, ge=1, le=200)
 
 
 class GetPendingToPublishInput(BaseModel):
@@ -78,25 +77,21 @@ class PublishContentByIdInput(BaseModel):
     )
 
 
-class PublishNextApprovedInput(BaseModel):
-    account_name: str = Field(
-        default="",
-        description="Optional override account name for the published item.",
-    )
-
-
 class PublishAllPendingInput(BaseModel):
     account_name: str = Field(
         default="",
         description="Optional override account name for all published items.",
     )
-    limit: int = Field(
-        default=50,
-        ge=1,
-        le=200,
-        description="Maximum number of approved pending items to process in this batch.",
-    )
+    limit: int = Field(default=50, ge=1, le=200)
 
+
+class SendPublishConfirmationInput(BaseModel):
+    content_id: str = Field(..., description="Content ID that was just published.")
+
+
+# ---------------------------------------------------------------------------
+# Tool functions
+# ---------------------------------------------------------------------------
 
 async def list_instagram_accounts() -> dict:
     accounts = settings.INSTAGRAM_ACCOUNTS
@@ -105,11 +100,6 @@ async def list_instagram_accounts() -> dict:
         "default": next(iter(accounts), "") if accounts else "",
         "count": len(accounts),
     }
-
-
-async def get_pending_approvals(limit: int = 50) -> dict:
-    items = await query_content(approval_status="pending", limit=limit)
-    return {"count": len(items), "items": items}
 
 
 async def get_pending_to_be_published(limit: int = 50) -> dict:
@@ -134,6 +124,7 @@ async def get_content_details(content_id: str) -> dict:
 
 
 async def _publish_record(record: dict, account_name: str = "") -> dict:
+    """Core publish logic for a single record."""
     content_id = record.get("id", "")
     approval_status = record.get("approval_status", "pending")
     if approval_status != "approved":
@@ -163,10 +154,11 @@ async def _publish_record(record: dict, account_name: str = "") -> dict:
             "content_id": content_id,
         }
 
-    target_account_name = account_name or record.get("target_account_name", "")
+    target_account_id = record.get("target_account_id", "")
+    target_account_name = record.get("target_account_name", "")
 
     try:
-        svc = _get_ig_service(target_account_name)
+        svc = InstagramService(account_id=target_account_id)
 
         if post_type == "carousel":
             image_urls = record.get("blob_urls") or []
@@ -206,9 +198,9 @@ async def _publish_record(record: dict, account_name: str = "") -> dict:
             container_id = await svc.create_image_container(media_url, caption_text)
             media_id = await svc.publish_container(container_id)
 
-        queue_result = await _queue_service.mark_published(content_id, media_id)
-        if "error" in queue_result:
-            await mark_content_published(content_id, media_id, container_id)
+        # Update DB: mark as published
+        await mark_content_published(content_id, media_id, container_id)
+
         return {
             "status": "published",
             "content_id": content_id,
@@ -228,19 +220,6 @@ async def publish_content_by_id(content_id: str, account_name: str = "") -> dict
     if not record:
         return {"status": "error", "error": f"Content {content_id} not found", "content_id": content_id}
     return await _publish_record(record, account_name)
-
-
-async def publish_next_approved(account_name: str = "") -> dict:
-    items = await _queue_service.get_approved_items()
-    if not items:
-        return {"status": "empty", "message": "No approved items in queue"}
-
-    items = sorted(items, key=lambda x: x.get("created_at", ""))
-    next_item = items[0]
-    content_id = next_item.get("content_id") or next_item.get("id")
-    if not content_id:
-        return {"status": "error", "error": "Approved queue item is missing content_id"}
-    return await publish_content_by_id(content_id, account_name)
 
 
 async def publish_all_pending(account_name: str = "", limit: int = 50) -> dict:
@@ -284,6 +263,23 @@ async def publish_all_pending(account_name: str = "", limit: int = 50) -> dict:
     }
 
 
+async def send_publish_confirmation(content_id: str) -> dict:
+    """Send a confirmation email after content has been published."""
+    record = await get_content_by_id(content_id)
+    if not record:
+        return {"status": "error", "error": f"Content {content_id} not found"}
+
+    if record.get("publish_status") != "published":
+        return {"status": "error", "error": f"Content {content_id} is not published yet"}
+
+    await _notification_service.notify_published(record)
+    return {"status": "confirmation_sent", "content_id": content_id}
+
+
+# ---------------------------------------------------------------------------
+# Build tools list
+# ---------------------------------------------------------------------------
+
 def build_publisher_tools() -> list[FunctionTool]:
     return [
         FunctionTool(
@@ -293,14 +289,8 @@ def build_publisher_tools() -> list[FunctionTool]:
             func=list_instagram_accounts,
         ),
         FunctionTool(
-            name="get_pending_approvals",
-            description="Get content records currently pending human approval from Cosmos DB.",
-            input_model=GetPendingApprovalsInput,
-            func=get_pending_approvals,
-        ),
-        FunctionTool(
             name="get_pending_to_be_published",
-            description="Get approved content that is pending publish.",
+            description="Get approved content that is pending publish from Cosmos DB.",
             input_model=GetPendingToPublishInput,
             func=get_pending_to_be_published,
         ),
@@ -323,15 +313,15 @@ def build_publisher_tools() -> list[FunctionTool]:
             func=publish_content_by_id,
         ),
         FunctionTool(
-            name="publish_next_approved",
-            description="Listen to the approved queue and publish the next approved content item.",
-            input_model=PublishNextApprovedInput,
-            func=publish_next_approved,
-        ),
-        FunctionTool(
             name="publish_all_pending",
-            description="Batch publish all approved content that is pending publish (up to limit). Continues on per-item errors and returns a summary.",
+            description="Batch publish all approved content that is pending publish (up to limit).",
             input_model=PublishAllPendingInput,
             func=publish_all_pending,
+        ),
+        FunctionTool(
+            name="send_publish_confirmation",
+            description="Send a confirmation email after content has been published to Instagram.",
+            input_model=SendPublishConfirmationInput,
+            func=send_publish_confirmation,
         ),
     ]

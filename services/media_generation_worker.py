@@ -25,6 +25,7 @@ from pathlib import Path
 
 import httpx
 from azure.identity.aio import DefaultAzureCredential
+from azure.servicebus import ServiceBusMessage
 from azure.servicebus.aio import ServiceBusClient
 from fal_client.client import AsyncClient as FalAsyncClient, Completed
 
@@ -35,11 +36,11 @@ from services.media_metadata_service import (
     update_content,
 )
 from services.blob_storage_service import upload_blob
-from services.review_queue_service import ReviewQueueService
 
 logger = logging.getLogger(__name__)
 
 QUEUE_GENERATION = "media-generation"
+QUEUE_REVIEW_PENDING = "review-pending"
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +134,6 @@ class MediaGenerationWorker:
     def __init__(self, poll_interval_seconds: int = 15) -> None:
         self._poll_interval = poll_interval_seconds
         self._fal: FalAsyncClient | None = None
-        self._review_queue = ReviewQueueService()
 
     def _get_fal(self) -> FalAsyncClient:
         if self._fal is None:
@@ -314,6 +314,8 @@ class MediaGenerationWorker:
             "blob_name": blob_info["blob_name"],
             "file_size_bytes": blob_info["file_size_bytes"],
             "fal_url": asset_url,
+            "approval_status": "pending",
+            "queued_for_review_at": _now_iso(),
         }
 
         if media_type == "image" and "images" in result:
@@ -324,23 +326,41 @@ class MediaGenerationWorker:
 
         await update_content(content_id, extra_updates)
 
-        # Enqueue for human review
-        account_name = record.get("account", "")
-        review_queue = ReviewQueueService(account_name=account_name)
-        await review_queue.queue_for_review(
-            content_id=content_id,
-            media_url=blob_url,
-            caption=record.get("caption", ""),
-            hashtags=" ".join(record.get("hashtags", [])),
-            content_type=media_type,
-            post_type=record.get("post_type", "post"),
-            target_account_id=record.get("target_account_id", ""),
-            topic=record.get("description", ""),
-            trend_source=account_name,
-        )
+        # Enqueue for human review via Service Bus
+        try:
+            credential = DefaultAzureCredential(
+                managed_identity_client_id=settings.AZURE_CLIENT_ID
+            )
+            sb_client = ServiceBusClient(
+                fully_qualified_namespace=settings.SERVICEBUS_NAMESPACE,
+                credential=credential,
+            )
+            async with sb_client:
+                sender = sb_client.get_queue_sender(QUEUE_REVIEW_PENDING)
+                async with sender:
+                    msg = ServiceBusMessage(
+                        body=json.dumps({"content_id": content_id}),
+                        application_properties={
+                            "content_id": content_id,
+                            "media_type": media_type,
+                            "account": record.get("account", ""),
+                        },
+                        subject=record.get("description") or "Instagram Post",
+                        message_id=f"{content_id}-review",
+                    )
+                    await sender.send_messages(msg)
+            logger.info(
+                "[gen-worker] Enqueued %s for review → review-pending queue",
+                content_id,
+            )
+        except Exception as exc:
+            logger.error(
+                "[gen-worker] Completed %s but failed to enqueue for review: %s",
+                content_id, exc,
+            )
 
         logger.info(
-            "[gen-worker] Completed %s generation content_id=%s → %s (queued for review)",
+            "[gen-worker] Completed %s generation content_id=%s → %s",
             media_type, content_id, blob_url,
         )
 

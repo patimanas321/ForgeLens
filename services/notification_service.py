@@ -174,3 +174,111 @@ class NotificationService:
             logger.info("[OK] Slack notification sent")
         except Exception as e:
             logger.error(f"[FAIL] Slack notification failed: {e}")
+
+    # ------------------------------------------------------------------
+    # Published confirmation
+    # ------------------------------------------------------------------
+
+    async def notify_published(self, record: dict) -> None:
+        """Send a confirmation email after content has been published to Instagram."""
+        if settings.ACS_ENDPOINT and settings.ACS_SENDER_EMAIL and settings.REVIEWER_EMAIL:
+            await self._send_published_email(record)
+        else:
+            logger.info(
+                "[PUBLISHED] Content %s published to Instagram (media_id=%s)",
+                record.get("id", "?"),
+                record.get("instagram_media_id", "?"),
+            )
+
+    async def _send_published_email(self, record: dict) -> None:
+        """Send a confirmation email via ACS after successful Instagram publish."""
+        content_id = record.get("id", "N/A")
+        topic = record.get("description") or record.get("topic", "Instagram Post")
+        subject = f"✅ Published: {topic}"
+
+        html_body = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <div style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+                        color: #1a1a1a; padding: 20px; border-radius: 8px 8px 0 0;">
+                <h2 style="margin: 0;">✅ Instagram Content Published</h2>
+            </div>
+            <div style="border: 1px solid #e0e0e0; border-top: none; padding: 20px;
+                        border-radius: 0 0 8px 8px;">
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr>
+                        <td style="padding: 8px; font-weight: bold; color: #555;">Content ID:</td>
+                        <td style="padding: 8px;"><code>{content_id}</code></td>
+                    </tr>
+                    <tr style="background: #f9f9f9;">
+                        <td style="padding: 8px; font-weight: bold; color: #555;">Type:</td>
+                        <td style="padding: 8px;">{record.get('post_type', 'post')} ({record.get('media_type', 'image')})</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; font-weight: bold; color: #555;">Topic:</td>
+                        <td style="padding: 8px;">{topic}</td>
+                    </tr>
+                    <tr style="background: #f9f9f9;">
+                        <td style="padding: 8px; font-weight: bold; color: #555;">Account:</td>
+                        <td style="padding: 8px;">{record.get('target_account_name', record.get('account', 'default'))}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; font-weight: bold; color: #555;">Instagram Media ID:</td>
+                        <td style="padding: 8px;"><code>{record.get('instagram_media_id', 'N/A')}</code></td>
+                    </tr>
+                    <tr style="background: #f9f9f9;">
+                        <td style="padding: 8px; font-weight: bold; color: #555;">Published At:</td>
+                        <td style="padding: 8px;">{record.get('published_at', 'N/A')}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; font-weight: bold; color: #555;">Caption:</td>
+                        <td style="padding: 8px;"><em>{(record.get('caption') or '')[:200]}</em></td>
+                    </tr>
+                </table>
+
+                <div style="margin-top: 16px; text-align: center;">
+                    <a href="{record.get('blob_url', '#')}"
+                       style="display: inline-block; background: #43e97b; color: #1a1a1a;
+                              padding: 12px 24px; text-decoration: none; border-radius: 6px;
+                              font-weight: bold;">
+                        🖼️ View Media
+                    </a>
+                </div>
+
+                <p style="margin-top: 20px; color: #888; font-size: 12px; text-align: center;">
+                    This is an automated confirmation from ForgeLens.
+                </p>
+            </div>
+        </body>
+        </html>
+        """
+
+        plain_text = (
+            f"Instagram content published successfully.\n\n"
+            f"Content ID: {content_id}\n"
+            f"Type: {record.get('post_type', 'post')} ({record.get('media_type', 'image')})\n"
+            f"Topic: {topic}\n"
+            f"Account: {record.get('target_account_name', 'default')}\n"
+            f"Instagram Media ID: {record.get('instagram_media_id', 'N/A')}\n"
+            f"Published At: {record.get('published_at', 'N/A')}\n"
+        )
+
+        message = {
+            "senderAddress": settings.ACS_SENDER_EMAIL,
+            "recipients": {
+                "to": [{"address": addr.strip()} for addr in settings.REVIEWER_EMAIL.split(",") if addr.strip()],
+            },
+            "content": {
+                "subject": subject,
+                "plainText": plain_text,
+                "html": html_body,
+            },
+        }
+
+        try:
+            client = _get_email_client()
+            poller = await asyncio.to_thread(client.begin_send, message)
+            result = await asyncio.to_thread(poller.result)
+            logger.info(f"[OK] Published confirmation email sent — message ID: {result.get('id', 'unknown')}")
+        except Exception as e:
+            logger.error(f"[FAIL] Published confirmation email failed: {e}")

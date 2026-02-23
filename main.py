@@ -35,7 +35,6 @@ from agents.account.agent import InstaAccountAgent
 from agents.account.workflow import build_content_pipeline
 from agents.trend_scout.agent import TrendScoutAgent
 from agents.approver.agent import ReviewQueueAgent
-from agents.communicator.agent import CommunicatorAgent
 from agents.publisher.agent import PublisherAgent
 from services.communicator_trigger_service import start_communicator_queue_trigger_worker
 from services.publisher_trigger_service import start_publisher_queue_trigger_worker
@@ -82,7 +81,6 @@ def main():
     # --- Create delegable specialist agents (shared across all accounts) ---
     trend_scout_agent = TrendScoutAgent(ai_client)
     approver_agent = ReviewQueueAgent(ai_client)
-    communicator_agent = CommunicatorAgent(ai_client)
 
     # Publisher is standalone: queue listener + content_id publisher
     publisher_agent = PublisherAgent(ai_client)
@@ -103,7 +101,6 @@ def main():
             profile,
             child_agents=[
                 trend_scout_agent,
-                communicator_agent,
             ],
         )
         account_agents.append(agent)
@@ -119,15 +116,13 @@ def main():
     logger.info(f"Created {len(account_agents)} account agent(s): {[a.profile.display_name for a in account_agents]}")
     logger.info(f"Created {len(pipeline_agents)} content pipeline(s)")
 
-    if settings.SERVICEBUS_NAMESPACE and False:  # Disabled — enable to test queue triggers locally
+    if settings.SERVICEBUS_NAMESPACE:
         start_media_generation_worker(poll_interval_seconds=15)
         start_communicator_queue_trigger_worker(
             poll_interval_seconds=20,
-            communicator_agent=communicator_agent.agent,
         )
         start_publisher_queue_trigger_worker(
             poll_interval_seconds=20,
-            publisher_agent=publisher_agent.agent,
         )
 
     # --- Build and start server ---
@@ -136,7 +131,6 @@ def main():
         + pipeline_agents                    # Content pipeline workflows
         + [
             trend_scout_agent.agent,
-            communicator_agent.agent,
             approver_agent.agent,
         ]
         + [publisher_agent.agent]            # Standalone publisher agent

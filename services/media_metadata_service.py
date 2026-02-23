@@ -8,6 +8,7 @@ Each document stores the blob URL, generation metadata, and timestamps.
 """
 
 import logging
+import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -20,24 +21,29 @@ from config.settings import settings
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Singleton client (reuse across calls — Cosmos DB best practice)
+# Thread-local client cache.
+# Background worker threads each run their own asyncio.run() loop, while the
+# main DevServer uses the uvicorn event loop.  An aiohttp-backed async client
+# created on one loop cannot be reused on another.  threading.local() gives
+# each thread its own client instance automatically.
 # ---------------------------------------------------------------------------
-_client: CosmosClient | None = None
-_credential: DefaultAzureCredential | None = None
+_local = threading.local()
 
 
 async def _get_container():
-    """Return (or lazily create) the Cosmos container client."""
-    global _client, _credential
+    """Return (or lazily create) the Cosmos container client for the *current* thread."""
+    client: CosmosClient | None = getattr(_local, "cosmos_client", None)
 
-    if _client is None:
-        _credential = DefaultAzureCredential(managed_identity_client_id=settings.AZURE_CLIENT_ID)
-        _client = CosmosClient(
+    if client is None:
+        credential = DefaultAzureCredential(managed_identity_client_id=settings.AZURE_CLIENT_ID)
+        client = CosmosClient(
             url=settings.COSMOS_ENDPOINT,
-            credential=_credential,
+            credential=credential,
         )
+        _local.cosmos_client = client
+        _local.cosmos_credential = credential
 
-    db = _client.get_database_client(settings.COSMOS_DATABASE)
+    db = client.get_database_client(settings.COSMOS_DATABASE)
     container = db.get_container_client(settings.COSMOS_CONTAINER)
     return container
 

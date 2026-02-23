@@ -20,7 +20,6 @@ from config.settings import settings
 from services.generation_queue_service import GenerationQueueService
 from services.instagram_service import InstagramService
 from services.media_metadata_service import get_content_by_id, query_content
-from services.review_queue_service import ReviewQueueService
 
 logger = logging.getLogger(__name__)
 
@@ -67,27 +66,8 @@ class GenerateVideoInput(BaseModel):
     topic: str = Field(..., description="Brief topic/theme of the reel, e.g. 'morning walk montage'.")
 
 
-class QueueForReviewInput(BaseModel):
-    content_id: str = Field(..., description="Cosmos content ID for the generated media.")
-    media_url: str = Field(..., description="URL or path to the generated media file.")
-    caption: str = Field(default="", description="The full Instagram caption text.")
-    hashtags: str = Field(default="", description="The hashtag string to accompany the post.")
-    content_type: str = Field(default="image", description="'image', 'carousel', 'reel', 'story'.")
-    post_type: str = Field(default="post", description="'post', 'reel', or 'carousel'.")
-    topic: str = Field(default="", description="The topic/theme of the post.")
-    trend_source: str = Field(default="", description="Where the trend was discovered.")
-
-
-class GetPendingReviewsInput(BaseModel):
-    pass
-
-
-class GetApprovedItemsInput(BaseModel):
-    pass
-
-
 class GetReviewStatusInput(BaseModel):
-    item_id: str = Field(..., description="The ID of the review item to check.")
+    item_id: str = Field(..., description="The content ID to check status for.")
 
 
 # ---------------------------------------------------------------------------
@@ -125,7 +105,6 @@ def build_account_tools(
 
     # Services scoped to this account
     ig_service = InstagramService(account_id=target_account_id) if target_account_id else None
-    queue_service = ReviewQueueService(account_name=account_name)
     generation_queue = GenerationQueueService(account_name=account_name)
 
     # Tavily client
@@ -307,38 +286,8 @@ def build_account_tools(
             return {"status": "error", "error": str(e)}
 
     # ------------------------------------------------------------------
-    # Review queue
+    # Review status (read-only, from DB)
     # ------------------------------------------------------------------
-
-    async def queue_for_review(
-        content_id: str,
-        media_url: str,
-        caption: str = "",
-        hashtags: str = "",
-        content_type: str = "image",
-        post_type: str = "post",
-        topic: str = "",
-        trend_source: str = "",
-    ) -> dict:
-        return await queue_service.queue_for_review(
-            content_id=content_id,
-            media_url=media_url,
-            caption=caption,
-            hashtags=hashtags,
-            content_type=content_type,
-            post_type=post_type,
-            target_account_id=target_account_id,
-            topic=topic,
-            trend_source=trend_source,
-        )
-
-    async def get_pending_reviews() -> dict:
-        items = await queue_service.get_pending_reviews()
-        return {"account": account_name, "count": len(items), "items": items}
-
-    async def get_approved_items() -> dict:
-        items = await queue_service.get_approved_items()
-        return {"account": account_name, "count": len(items), "items": items}
 
     async def get_review_status(item_id: str) -> dict:
         record = await get_content_by_id(item_id)
@@ -346,13 +295,16 @@ def build_account_tools(
             return {"error": f"Item {item_id} not found"}
         if target_account_id and record.get("target_account_id") != target_account_id:
             return {"error": "Access denied for this account"}
-
-        status = await queue_service.get_review_status(item_id)
-        if "error" in status:
-            return status
-        if target_account_id and status.get("target_account_id") and status["target_account_id"] != target_account_id:
-            return {"error": "Access denied for this account"}
-        return status
+        return {
+            "id": record["id"],
+            "approval_status": record.get("approval_status", "unknown"),
+            "generation_status": record.get("generation_status", "unknown"),
+            "publish_status": record.get("publish_status", "pending"),
+            "blob_url": record.get("blob_url", ""),
+            "created_at": record.get("created_at"),
+            "reviewed_at": record.get("reviewed_at"),
+            "reviewer_notes": record.get("reviewer_notes", ""),
+        }
 
     # ------------------------------------------------------------------
     # Assemble
@@ -390,26 +342,8 @@ def build_account_tools(
             func=generate_video,
         ),
         FunctionTool(
-            name="queue_for_review",
-            description="Queue generated content for human approval. Requires the content_id from generate_image/generate_video.",
-            input_model=QueueForReviewInput,
-            func=queue_for_review,
-        ),
-        FunctionTool(
-            name="get_pending_reviews",
-            description="List items awaiting human review for this account.",
-            input_model=GetPendingReviewsInput,
-            func=get_pending_reviews,
-        ),
-        FunctionTool(
-            name="get_approved_items",
-            description="Get approved items ready to publish for this account.",
-            input_model=GetApprovedItemsInput,
-            func=get_approved_items,
-        ),
-        FunctionTool(
             name="get_review_status",
-            description="View review status/details for one item by its ID.",
+            description="Check the current generation/approval/publish status of a content item by its ID.",
             input_model=GetReviewStatusInput,
             func=get_review_status,
         ),

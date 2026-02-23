@@ -9,6 +9,7 @@ Container is auto-created on first use.
 
 import logging
 import mimetypes
+import threading
 from pathlib import Path
 
 from azure.identity.aio import DefaultAzureCredential
@@ -20,24 +21,25 @@ from config.settings import settings
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Singleton client (reuse across calls)
+# Thread-local client cache (same rationale as media_metadata_service).
 # ---------------------------------------------------------------------------
-_async_client: AsyncBlobServiceClient | None = None
+_local = threading.local()
 
 
 async def _get_async_client() -> AsyncBlobServiceClient:
-    global _async_client
-    if _async_client is None:
+    client: AsyncBlobServiceClient | None = getattr(_local, "blob_client", None)
+    if client is None:
         if settings.AZURE_STORAGE_CONNECTION_STRING:
-            _async_client = AsyncBlobServiceClient.from_connection_string(
+            client = AsyncBlobServiceClient.from_connection_string(
                 settings.AZURE_STORAGE_CONNECTION_STRING,
             )
         else:
-            _async_client = AsyncBlobServiceClient(
+            client = AsyncBlobServiceClient(
                 account_url=settings.AZURE_STORAGE_ACCOUNT_URL,
                 credential=DefaultAzureCredential(managed_identity_client_id=settings.AZURE_CLIENT_ID),
             )
-    return _async_client
+        _local.blob_client = client
+    return client
 
 
 def _content_type(file_path: Path) -> str:

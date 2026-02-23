@@ -13,7 +13,6 @@ class Agent(str, Enum):
     """Canonical agent identifiers — used as ChatAgent.id values."""
     ORCHESTRATOR = "orchestrator"
     TREND_SCOUT = "trend-scout"
-    COMMUNICATOR = "communicator"
     REVIEW_QUEUE = "review-queue"
     PUBLISHER = "publisher"
 
@@ -50,20 +49,6 @@ AGENT_REGISTRY: dict[Agent, AgentEntry] = {
         arg_description=(
             "What to search for — e.g. 'trending topics in tech this week', "
             "'competitor analysis for @account', 'viral reels in fitness niche'."
-        ),
-    ),
-
-    # ---- Communicator ----
-    Agent.COMMUNICATOR: AgentEntry(
-        name="Communicator",
-        description=(
-            "Handles reviewer communications and reminders for pending approvals. "
-            "Can be called by account agents and also used by queue-trigger automation."
-        ),
-        tool_name="call_communicator",
-        arg_description=(
-            "A communication action such as 'Send reminder for item <id>' or "
-            "'Notify pending approvals for account <id>'."
         ),
     ),
 
