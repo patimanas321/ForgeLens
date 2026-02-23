@@ -10,17 +10,6 @@ import os
 logger = logging.getLogger(__name__)
 
 
-def _kv_or_env(kv_name: str, env_name: str, default: str = "") -> str:
-    """Try Key Vault first, fall back to env var, then default."""
-    # Lazy import avoids circular dependency at module load
-    from shared.config.keyvault import kv
-
-    value = kv.get(kv_name)
-    if value:
-        return value
-    return os.environ.get(env_name, default)
-
-
 class Settings:
     # --- Managed Identity (for Azure-hosted deployments) ---
     AZURE_CLIENT_ID: str = "02911707-a3a0-49b8-8ab0-4a8f0c9a5830"
@@ -37,7 +26,8 @@ class Settings:
     # --- fal.ai Media Generation (secret from KV) ---
     @property
     def FAL_KEY(self) -> str:
-        return _kv_or_env("fal-key", "FAL_KEY")
+        from shared.config.keyvault import kv
+        return kv.get("fal-key") or ""
 
     FAL_IMAGE_MODEL: str = os.environ.get("FAL_IMAGE_MODEL", "fal-ai/nano-banana-pro")
     FAL_VIDEO_MODEL: str = os.environ.get("FAL_VIDEO_MODEL", "fal-ai/kling-video/o3/standard/text-to-video")
@@ -46,7 +36,8 @@ class Settings:
     # --- Instagram Graph API (secrets from KV) ---
     @property
     def INSTAGRAM_ACCESS_TOKEN(self) -> str:
-        return _kv_or_env("instagram-access-token", "INSTAGRAM_ACCESS_TOKEN")
+        from shared.config.keyvault import kv
+        return kv.get("instagram-access-token") or ""
 
     @property
     def INSTAGRAM_BUSINESS_ACCOUNT_ID(self) -> str:
@@ -70,7 +61,8 @@ class Settings:
     # --- Web Search / Tavily (secret from KV) ---
     @property
     def TAVILY_API_KEY(self) -> str:
-        return _kv_or_env("tavily-api-key", "TAVILY_API_KEY")
+        from shared.config.keyvault import kv
+        return kv.get("tavily-api-key") or ""
 
     @property
     def TAVILY_MCP_URL(self) -> str:

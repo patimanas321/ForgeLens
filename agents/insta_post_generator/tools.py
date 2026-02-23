@@ -23,12 +23,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-import fal_client
+from fal_client.client import AsyncClient as FalAsyncClient
 import httpx
 from agent_framework import FunctionTool
 from pydantic import BaseModel, Field
 
 from shared.config.settings import settings
+
+# Create a fal.ai client with the KV-sourced key (no env vars needed)
+_fal: FalAsyncClient | None = None
+
+
+def _get_fal() -> FalAsyncClient:
+    global _fal
+    if _fal is None:
+        _fal = FalAsyncClient(key=settings.FAL_KEY)
+    return _fal
+
 from shared.services.blob_storage_service import upload_blob
 from shared.services.media_metadata_service import save_media_metadata, update_content, get_content_by_id
 from shared.services.review_queue_service import ReviewQueueService
@@ -231,7 +242,7 @@ async def _execute_image_job(
     topic: str,
 ) -> dict:
     model_id = settings.FAL_IMAGE_MODEL
-    result = await fal_client.subscribe_async(
+    result = await _get_fal().subscribe(
         model_id,
         arguments={
             "prompt": prompt,
@@ -318,7 +329,7 @@ async def _execute_video_job(
             "aspect_ratio": aspect_ratio,
         }
 
-    result = await fal_client.subscribe_async(model_id, arguments=arguments)
+    result = await _get_fal().subscribe(model_id, arguments=arguments)
     video_data = result["video"]
     video_url = video_data["url"]
     file_path = await _download_to_local(video_url, "mp4")
@@ -407,7 +418,7 @@ async def generate_image(
         model_id = settings.FAL_IMAGE_MODEL
         logger.info(f"[fal.ai] Generating image via {model_id} | aspect={aspect_ratio} res={resolution}")
 
-        result = await fal_client.subscribe_async(
+        result = await _get_fal().subscribe(
             model_id,
             arguments={
                 "prompt": prompt,
@@ -524,7 +535,7 @@ async def generate_video(
                 "aspect_ratio": aspect_ratio,
             }
 
-        result = await fal_client.subscribe_async(model_id, arguments=arguments)
+        result = await _get_fal().subscribe(model_id, arguments=arguments)
 
         video_data = result["video"]
         video_url = video_data["url"]
