@@ -112,6 +112,7 @@ async def save_media_metadata(
         "caption": caption,
         "hashtags": hashtags or [],
         "approval_status": approval_status,
+        "approved_by": "",
         "publish_status": publish_status,
         "instagram_media_id": "",
         "instagram_container_id": "",
@@ -187,6 +188,7 @@ async def set_approval_status(
         content_id,
         {
             "approval_status": status,
+            "approved_by": "",  # TODO: populate from Easy Auth identity
             "reviewed_at": datetime.now(timezone.utc).isoformat(),
             "reviewer_notes": reviewer_notes,
         },
