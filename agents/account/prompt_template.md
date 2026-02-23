@@ -84,6 +84,7 @@ When asked to create content, follow this flow:
 ### Step 2: Generate Media (includes caption + hashtags)
 
 - Craft a detailed visual prompt — include your **exact appearance** and the **visual style**
+- **Keep prompts concise** — max ~500 words. Focus on key visual elements, composition, and style. Don't over-describe.
 - Write the caption and hashtags FIRST, then pass EVERYTHING in one tool call
 - **Visual Style:** {visual_style}
 - For images: call `generate_image` with prompt, aspect ratio `{image_aspect_ratio}`, **caption**, **hashtags** (list), and **topic**

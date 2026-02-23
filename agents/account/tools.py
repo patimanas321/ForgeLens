@@ -234,6 +234,24 @@ def build_account_tools(
     # Media generation (queue-based)
     # ------------------------------------------------------------------
 
+    # fal.ai prompt length limits (undocumented, derived from testing)
+    MAX_IMAGE_PROMPT_CHARS = 2000   # Nano Banana Pro (Gemini-based)
+    MAX_VIDEO_PROMPT_CHARS = 2500   # Kling O3
+
+    def _truncate_prompt(text: str, limit: int) -> str:
+        if len(text) <= limit:
+            return text
+        # Cut at last sentence boundary within limit, fall back to hard cut
+        truncated = text[:limit]
+        last_period = truncated.rfind(". ")
+        if last_period > limit // 2:
+            truncated = truncated[: last_period + 1]
+        logger.warning(
+            "[prompt] Truncated from %d to %d chars (limit %d)",
+            len(text), len(truncated), limit,
+        )
+        return truncated
+
     async def generate_image(
         prompt: str, aspect_ratio: str = "4:5", resolution: str = "1K", output_format: str = "png",
         caption: str = "", hashtags: list[str] | None = None, topic: str = "",
@@ -241,7 +259,7 @@ def build_account_tools(
         try:
             doc = await generation_queue.submit_generation(
                 media_type="image",
-                prompt=prompt,
+                prompt=_truncate_prompt(prompt, MAX_IMAGE_PROMPT_CHARS),
                 aspect_ratio=aspect_ratio,
                 resolution=resolution,
                 output_format=output_format,
@@ -268,7 +286,7 @@ def build_account_tools(
         try:
             doc = await generation_queue.submit_generation(
                 media_type="video",
-                prompt=prompt,
+                prompt=_truncate_prompt(prompt, MAX_VIDEO_PROMPT_CHARS),
                 aspect_ratio=aspect_ratio,
                 duration=duration,
                 video_model=video_model,
