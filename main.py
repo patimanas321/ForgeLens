@@ -1,7 +1,7 @@
 """
 ForgeLens — Per-account Instagram automation agents.
 
-Entry point: discovers account profiles from data/accounts/*.json,
+Entry point: discovers account profiles from insta_profiles/*.json,
 creates one InstaAccountAgent per profile, and starts the MAF DevServer.
 
 Usage:
@@ -80,7 +80,7 @@ def main():
     # --- Discover account profiles and create one agent per account ---
     profiles = load_all_profiles()
     if not profiles:
-        logger.error("No account profiles found in data/accounts/*.json — nothing to start")
+        logger.error("No account profiles found in insta_profiles/*.json — nothing to start")
         return
 
     account_agents: list[InstaAccountAgent] = []

@@ -9,6 +9,7 @@ instances bound to its Instagram account.
 import asyncio
 import json
 import logging
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,12 +30,6 @@ from shared.services.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
 
-MEDIA_DIR = Path(__file__).parent.parent.parent / "data" / "media"
-MEDIA_DIR.mkdir(parents=True, exist_ok=True)
-
-CALENDAR_DIR = Path(__file__).parent.parent.parent / "data" / "content_calendar"
-CALENDAR_DIR.mkdir(parents=True, exist_ok=True)
-
 
 # ---------------------------------------------------------------------------
 # Input schemas
@@ -49,19 +44,6 @@ class WebSearchInput(BaseModel):
 # -- Content strategy --
 class PostingHistoryInput(BaseModel):
     limit: int = Field(default=20, ge=1, le=50, description="Number of recent posts to fetch.")
-
-
-class GetCalendarInput(BaseModel):
-    days: int = Field(default=7, ge=1, le=30, description="Number of past days.")
-
-
-class SaveContentPlanInput(BaseModel):
-    topic: str = Field(..., description="Selected topic.")
-    format: str = Field(..., description="'image', 'carousel', 'reel'.")
-    visual_direction: str = Field(..., description="Visual style description.")
-    caption_direction: str = Field(..., description="Tone and CTA guidance.")
-    hashtag_themes: str = Field(default="", description="Themes for hashtags.")
-    reasoning: str = Field(default="", description="Why this topic.")
 
 
 # -- Media generation --
@@ -140,7 +122,7 @@ class CheckPublishStatusInput(BaseModel):
 
 async def _download_to_local(url: str, extension: str) -> Path:
     file_name = f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}.{extension}"
-    file_path = MEDIA_DIR / file_name
+    file_path = Path(tempfile.gettempdir()) / file_name
     async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.get(url)
         resp.raise_for_status()
@@ -217,34 +199,7 @@ def build_account_tools(profile: AccountProfile) -> list[FunctionTool]:
                 return await ig_service.get_recent_media(limit=limit)
             except Exception as e:
                 logger.warning(f"Could not fetch IG history: {e}")
-        return await get_content_calendar(days=14)
-
-    async def get_content_calendar(days: int = 7) -> list[dict]:
-        acct_dir = CALENDAR_DIR / profile.account_name
-        acct_dir.mkdir(parents=True, exist_ok=True)
-        plans = []
-        for path in sorted(acct_dir.glob("*.json"), reverse=True)[:days]:
-            plans.append(json.loads(path.read_text()))
-        return plans
-
-    async def save_content_plan(
-        topic: str, format: str, visual_direction: str, caption_direction: str,
-        hashtag_themes: str = "", reasoning: str = "",
-    ) -> dict:
-        acct_dir = CALENDAR_DIR / profile.account_name
-        acct_dir.mkdir(parents=True, exist_ok=True)
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        plan = {
-            "account": profile.account_name,
-            "date": today,
-            "topic": topic, "format": format,
-            "visual_direction": visual_direction, "caption_direction": caption_direction,
-            "hashtag_themes": hashtag_themes, "reasoning": reasoning,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        path = acct_dir / f"{today}.json"
-        path.write_text(json.dumps(plan, indent=2))
-        return plan
+        return []
 
     async def generate_image(
         prompt: str, aspect_ratio: str = "4:5", resolution: str = "1K", output_format: str = "png",
@@ -437,10 +392,6 @@ def build_account_tools(profile: AccountProfile) -> list[FunctionTool]:
                      input_model=WebSearchInput, func=web_search),
         FunctionTool(name="get_posting_history", description="Fetch recent Instagram posts to avoid repetition.",
                      input_model=PostingHistoryInput, func=get_posting_history),
-        FunctionTool(name="get_content_calendar", description="View recent content plans.",
-                     input_model=GetCalendarInput, func=get_content_calendar),
-        FunctionTool(name="save_content_plan", description="Save a content plan to the calendar.",
-                     input_model=SaveContentPlanInput, func=save_content_plan),
         FunctionTool(name="generate_image", description="Generate an image via AI. Auto-uploads to storage.",
                      input_model=GenerateImageInput, func=generate_image),
         FunctionTool(name="generate_video", description="Generate a video via AI. Auto-uploads to storage.",

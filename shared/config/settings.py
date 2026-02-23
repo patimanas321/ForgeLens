@@ -23,7 +23,7 @@ def _kv_or_env(kv_name: str, env_name: str, default: str = "") -> str:
 
 class Settings:
     # --- Managed Identity (for Azure-hosted deployments) ---
-    AZURE_CLIENT_ID: str = "e4b44133-ccc8-4425-b12e-8c730ccb5629"
+    AZURE_CLIENT_ID: str = "02911707-a3a0-49b8-8ab0-4a8f0c9a5830"
 
     # --- Azure Key Vault ---
     AZURE_KEYVAULT_URL: str = os.environ.get("AZURE_KEYVAULT_URL", "https://forgelens-kv.vault.azure.net/")

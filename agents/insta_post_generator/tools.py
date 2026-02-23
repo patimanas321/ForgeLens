@@ -18,6 +18,7 @@ Every generated asset is:
 import logging
 import uuid
 import asyncio
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -35,10 +36,6 @@ from shared.services.review_queue_service import ReviewQueueService
 logger = logging.getLogger(__name__)
 _review_queue = ReviewQueueService()
 _generation_jobs: dict[str, dict] = {}
-
-# Local media storage for MVP (swap for Azure Blob Storage in production)
-MEDIA_DIR = Path(__file__).parent.parent.parent / "data" / "media"
-MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ------------------------------------------------------------------
@@ -176,7 +173,7 @@ class CheckGenerationStatusInput(BaseModel):
 async def _download_to_local(url: str, extension: str) -> Path:
     """Download a file from a URL and save it locally."""
     file_name = f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}.{extension}"
-    file_path = MEDIA_DIR / file_name
+    file_path = Path(tempfile.gettempdir()) / file_name
     async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.get(url)
         resp.raise_for_status()

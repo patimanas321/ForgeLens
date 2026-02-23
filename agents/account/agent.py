@@ -5,7 +5,7 @@ Each instance manages one Instagram persona. It delegates work to
 specialist child agents (Trend Scout, Insta Post Generator), while handling
 strategy/copywriting and account-scoped queue operations internally.
 
-Created dynamically from account profile JSON files in data/accounts/.
+Created dynamically from account profile JSON files in insta_profiles/.
 """
 
 from __future__ import annotations

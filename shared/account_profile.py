@@ -1,5 +1,5 @@
 """
-Account Profiles — loads persona configurations from data/accounts/*.json.
+Account Profiles — loads persona configurations from insta_profiles/*.json.
 
 Each JSON file defines one Instagram account persona. The profile includes:
   - Instagram account mapping (links to Key Vault secret)
@@ -17,7 +17,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-ACCOUNTS_DIR = Path(__file__).parent.parent / "data" / "accounts"
+ACCOUNTS_DIR = Path(__file__).parent.parent / "insta_profiles"
 
 
 @dataclass
@@ -73,7 +73,7 @@ def _parse_profile(data: dict) -> AccountProfile:
 
 
 def load_all_profiles() -> dict[str, AccountProfile]:
-    """Load all account profiles from data/accounts/*.json."""
+    """Load all account profiles from insta_profiles/*.json."""
     profiles: dict[str, AccountProfile] = {}
     if not ACCOUNTS_DIR.exists():
         logger.warning(f"Accounts directory not found: {ACCOUNTS_DIR}")
