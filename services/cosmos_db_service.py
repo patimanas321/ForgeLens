@@ -72,7 +72,6 @@ async def save_media_metadata(
     description: str = "",
     caption: str = "",
     hashtags: list[str] | None = None,
-    approval_status: str = "pending",
     publish_status: str = "pending",
     extra: dict[str, Any] | None = None,
 ) -> dict:
@@ -117,13 +116,19 @@ async def save_media_metadata(
         "description": description,
         "caption": caption,
         "hashtags": hashtags or [],
-        "approval_status": approval_status,
-        "approved_by": "",
+        "prompt_review_status": "pending",
+        "media_review_status": "pending",
+        "human_approval_status": "pending",
+        "prompt_reviewed_at": None,
+        "prompt_reviewer_notes": "",
+        "media_reviewed_at": None,
+        "media_reviewer_notes": "",
+        "human_reviewed_at": None,
+        "human_reviewer_notes": "",
         "publish_status": publish_status,
         "instagram_media_id": "",
         "instagram_container_id": "",
         "published_at": None,
-        "queued_for_review_at": None,
         "created_at": datetime.now(timezone.utc).isoformat(),
         **(extra or {}),
     }
@@ -184,19 +189,50 @@ async def delete_media_metadata(content_id: str, media_type: str) -> bool:
         return False
 
 
-async def set_approval_status(
+async def set_prompt_review_status(
     content_id: str,
     status: str,
     reviewer_notes: str = "",
 ) -> dict | None:
-    """Update approval status for a content record."""
+    """Update prompt review status (agent gate #1)."""
     return await update_content(
         content_id,
         {
-            "approval_status": status,
-            "approved_by": "",  # TODO: populate from Easy Auth identity
-            "reviewed_at": datetime.now(timezone.utc).isoformat(),
-            "reviewer_notes": reviewer_notes,
+            "prompt_review_status": status,
+            "prompt_reviewed_at": datetime.now(timezone.utc).isoformat(),
+            "prompt_reviewer_notes": reviewer_notes,
+        },
+    )
+
+
+async def set_media_review_status(
+    content_id: str,
+    status: str,
+    reviewer_notes: str = "",
+) -> dict | None:
+    """Update generated media review status (agent gate #2)."""
+    return await update_content(
+        content_id,
+        {
+            "media_review_status": status,
+            "media_reviewed_at": datetime.now(timezone.utc).isoformat(),
+            "media_reviewer_notes": reviewer_notes,
+        },
+    )
+
+
+async def set_human_approval_status(
+    content_id: str,
+    status: str,
+    reviewer_notes: str = "",
+) -> dict | None:
+    """Update human posting approval status (gate #3)."""
+    return await update_content(
+        content_id,
+        {
+            "human_approval_status": status,
+            "human_reviewed_at": datetime.now(timezone.utc).isoformat(),
+            "human_reviewer_notes": reviewer_notes,
         },
     )
 
@@ -260,7 +296,9 @@ async def query_media(
 
 async def query_content(
     *,
-    approval_status: str | None = None,
+    prompt_review_status: str | None = None,
+    media_review_status: str | None = None,
+    human_approval_status: str | None = None,
     publish_status: str | None = None,
     target_account_id: str | None = None,
     limit: int = 50,
@@ -271,9 +309,15 @@ async def query_content(
     filters = []
     params: list[dict[str, Any]] = [{"name": "@limit", "value": limit}]
 
-    if approval_status:
-        filters.append("c.approval_status = @approval_status")
-        params.append({"name": "@approval_status", "value": approval_status})
+    if prompt_review_status:
+        filters.append("c.prompt_review_status = @prompt_review_status")
+        params.append({"name": "@prompt_review_status", "value": prompt_review_status})
+    if media_review_status:
+        filters.append("c.media_review_status = @media_review_status")
+        params.append({"name": "@media_review_status", "value": media_review_status})
+    if human_approval_status:
+        filters.append("c.human_approval_status = @human_approval_status")
+        params.append({"name": "@human_approval_status", "value": human_approval_status})
     if publish_status:
         filters.append("c.publish_status = @publish_status")
         params.append({"name": "@publish_status", "value": publish_status})

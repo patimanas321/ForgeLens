@@ -266,10 +266,12 @@ def build_account_tools(
             description=topic,
             caption=caption,
             hashtags=hashtags,
-            approval_status="pending_review",
             publish_status="pending",
             extra={
                 "generation_status": "pending_review",
+                "prompt_review_status": "pending",
+                "media_review_status": "pending",
+                "human_approval_status": "pending",
                 "output_format": output_format,
                 "video_model": video_model,
                 "account": account_name,
@@ -287,7 +289,6 @@ def build_account_tools(
     async def _submit_to_queue(content_id: str, media_type: str) -> None:
         await update_content(content_id, {
             "generation_status": "queued",
-            "approval_status": "approved_by_reviewer",
             "generation_requested_at": datetime.now(timezone.utc).isoformat(),
         })
         try:
@@ -372,13 +373,19 @@ def build_account_tools(
             return {"error": "Access denied for this account"}
         return {
             "id": record["id"],
-            "approval_status": record.get("approval_status", "unknown"),
+            "prompt_review_status": record.get("prompt_review_status", "unknown"),
+            "media_review_status": record.get("media_review_status", "unknown"),
+            "human_approval_status": record.get("human_approval_status", "unknown"),
             "generation_status": record.get("generation_status", "unknown"),
             "publish_status": record.get("publish_status", "pending"),
             "blob_url": record.get("blob_url", ""),
             "created_at": record.get("created_at"),
-            "reviewed_at": record.get("reviewed_at"),
-            "reviewer_notes": record.get("reviewer_notes", ""),
+            "prompt_reviewed_at": record.get("prompt_reviewed_at"),
+            "prompt_reviewer_notes": record.get("prompt_reviewer_notes", ""),
+            "media_reviewed_at": record.get("media_reviewed_at"),
+            "media_reviewer_notes": record.get("media_reviewer_notes", ""),
+            "human_reviewed_at": record.get("human_reviewed_at"),
+            "human_reviewer_notes": record.get("human_reviewer_notes", ""),
         }
 
     # ------------------------------------------------------------------
@@ -399,6 +406,16 @@ def build_account_tools(
             return {
                 "status": "error",
                 "error": f"Content {content_id} is in '{gen_status}' state, not 'pending_review'. Cannot submit.",
+            }
+
+        prompt_status = record.get("prompt_review_status", "pending")
+        if prompt_status != "approved":
+            return {
+                "status": "error",
+                "error": (
+                    f"Content {content_id} prompt review is '{prompt_status}'. "
+                    "Must be 'approved' before generation submission."
+                ),
             }
 
         try:

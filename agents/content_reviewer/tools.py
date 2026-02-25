@@ -19,7 +19,11 @@ from pydantic import BaseModel, Field
 
 from config.settings import settings
 from services.content_safety_service import analyze_text, analyze_image_from_url
-from services.cosmos_db_service import get_content_by_id
+from services.cosmos_db_service import (
+    get_content_by_id,
+    set_media_review_status,
+    set_prompt_review_status,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -238,21 +242,31 @@ async def review_content_plan(content_id: str) -> dict:
     safety_result = analyze_text(reviewable_text)
 
     if not safety_result.safe:
+        summary = f"Content blocked by Azure Content Safety. Categories flagged: {', '.join(safety_result.blocked_categories)}"
+        await set_prompt_review_status(content_id, "rejected", summary)
         return {
             "content_id": content_id,
             "verdict": "REJECTED",
             "reason": "Azure Content Safety hard block",
             "content_safety": safety_result.as_dict(),
             "llm_review": None,
-            "summary": f"Content blocked by Azure Content Safety. Categories flagged: {', '.join(safety_result.blocked_categories)}",
+            "summary": summary,
         }
 
     # Layer 2: LLM nuanced review
     llm_result = await _llm_review_text(reviewable_text, context)
+    verdict = str(llm_result.get("verdict", "NEEDS_REVISION")).strip().upper()
+    status_map = {
+        "APPROVED": "approved",
+        "REJECTED": "rejected",
+        "NEEDS_REVISION": "needs_revision",
+    }
+    mapped_status = status_map.get(verdict, "needs_revision")
+    await set_prompt_review_status(content_id, mapped_status, llm_result.get("summary", ""))
 
     return {
         "content_id": content_id,
-        "verdict": llm_result.get("verdict", "NEEDS_REVISION"),
+        "verdict": verdict,
         "content_safety": safety_result.as_dict(),
         "llm_review": llm_result,
         "summary": llm_result.get("summary", ""),
@@ -293,8 +307,10 @@ async def review_generated_media(content_id: str) -> dict:
         result["image_content_safety"] = image_safety.as_dict()
 
         if not image_safety.safe:
+            summary = f"Image blocked by Azure Content Safety. Categories: {', '.join(image_safety.blocked_categories)}"
+            await set_media_review_status(content_id, "rejected", summary)
             result["verdict"] = "REJECTED"
-            result["summary"] = f"Image blocked by Azure Content Safety. Categories: {', '.join(image_safety.blocked_categories)}"
+            result["summary"] = summary
             return result
 
     # Also check the text metadata
@@ -304,8 +320,10 @@ async def review_generated_media(content_id: str) -> dict:
         result["text_content_safety"] = text_safety.as_dict()
 
         if not text_safety.safe:
+            summary = f"Text metadata blocked by Content Safety. Categories: {', '.join(text_safety.blocked_categories)}"
+            await set_media_review_status(content_id, "rejected", summary)
             result["verdict"] = "REJECTED"
-            result["summary"] = f"Text metadata blocked by Content Safety. Categories: {', '.join(text_safety.blocked_categories)}"
+            result["summary"] = summary
             return result
 
     # Layer 2: LLM vision review (images only — videos get text-only review)
@@ -317,7 +335,16 @@ async def review_generated_media(content_id: str) -> dict:
         llm_result = await _llm_review_text(reviewable_text, context + " [This is a video — visual review not available, reviewing text metadata only.]")
         result["llm_text_review"] = llm_result
 
-    result["verdict"] = llm_result.get("verdict", "NEEDS_REVISION")
+    verdict = str(llm_result.get("verdict", "NEEDS_REVISION")).strip().upper()
+    status_map = {
+        "APPROVED": "approved",
+        "REJECTED": "rejected",
+        "NEEDS_REVISION": "needs_revision",
+    }
+    mapped_status = status_map.get(verdict, "needs_revision")
+    await set_media_review_status(content_id, mapped_status, llm_result.get("summary", ""))
+
+    result["verdict"] = verdict
     result["summary"] = llm_result.get("summary", "")
     return result
 

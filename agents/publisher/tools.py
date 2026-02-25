@@ -104,7 +104,8 @@ async def list_instagram_accounts() -> dict:
 
 async def get_pending_to_be_published(limit: int = 50) -> dict:
     items = await query_content(
-        approval_status="approved",
+        human_approval_status="approved",
+        media_review_status="approved",
         publish_status="pending",
         limit=limit,
     )
@@ -126,11 +127,19 @@ async def get_content_details(content_id: str) -> dict:
 async def _publish_record(record: dict, account_name: str = "") -> dict:
     """Core publish logic for a single record."""
     content_id = record.get("id", "")
-    approval_status = record.get("approval_status", "pending")
-    if approval_status != "approved":
+    human_approval_status = record.get("human_approval_status", "pending")
+    if human_approval_status != "approved":
         return {
             "status": "error",
-            "error": f"Content {content_id} is not approved (status={approval_status})",
+            "error": f"Content {content_id} is not human-approved (status={human_approval_status})",
+            "content_id": content_id,
+        }
+
+    media_review_status = record.get("media_review_status", "pending")
+    if media_review_status != "approved":
+        return {
+            "status": "error",
+            "error": f"Content {content_id} media review is not approved (status={media_review_status})",
             "content_id": content_id,
         }
 
@@ -225,7 +234,8 @@ async def publish_content_by_id(content_id: str, account_name: str = "") -> dict
 async def publish_all_pending(account_name: str = "", limit: int = 50) -> dict:
     """Publish all approved items that are pending publish, up to limit."""
     pending = await query_content(
-        approval_status="approved",
+        human_approval_status="approved",
+        media_review_status="approved",
         publish_status="pending",
         limit=limit,
     )

@@ -307,8 +307,8 @@ class MediaGenerationWorker:
             "blob_name": blob_info["blob_name"],
             "file_size_bytes": blob_info["file_size_bytes"],
             "fal_url": asset_url,
-            "approval_status": "pending",
-            "queued_for_review_at": _now_iso(),
+            "media_review_status": "pending",
+            "human_approval_status": "pending",
         }
 
         if media_type == "image" and "images" in result:
@@ -319,7 +319,29 @@ class MediaGenerationWorker:
 
         await update_content(content_id, extra_updates)
 
-        # Enqueue for human review via Service Bus
+        # Agent gate #2: auto-review generated media before any human approval step
+        try:
+            from agents.content_reviewer.tools import review_generated_media
+
+            review_result = await review_generated_media(content_id)
+            verdict = str(review_result.get("verdict", "NEEDS_REVISION")).upper()
+            if verdict != "APPROVED":
+                logger.warning(
+                    "[gen-worker] Media review blocked content %s (verdict=%s): %s",
+                    content_id,
+                    verdict,
+                    review_result.get("summary", ""),
+                )
+                return
+        except Exception as exc:
+            logger.error(
+                "[gen-worker] Media review step failed for %s: %s",
+                content_id,
+                exc,
+            )
+            return
+
+        # Enqueue for human gate #3 (posting approval)
         try:
             await send_message_to_review_pending_queue(
                 content_id=content_id,
@@ -328,8 +350,9 @@ class MediaGenerationWorker:
                 subject=record.get("description") or "Instagram Post",
                 message_id=f"{content_id}-review",
             )
+            await update_content(content_id, {"human_approval_status": "pending"})
             logger.info(
-                "[gen-worker] Enqueued %s for review → review-pending queue",
+                "[gen-worker] Enqueued %s for human posting approval → review-pending queue",
                 content_id,
             )
         except Exception as exc:

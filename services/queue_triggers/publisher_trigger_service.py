@@ -77,10 +77,17 @@ class PublisherQueueWorker:
             logger.warning("[publisher-worker] Content %s not found in DB", content_id)
             return
 
-        if record.get("approval_status") != "approved":
+        if record.get("human_approval_status") != "approved":
             logger.info(
-                "[publisher-worker] Content %s not approved (status=%s), skipping",
-                content_id, record.get("approval_status"),
+                "[publisher-worker] Content %s not human-approved (status=%s), skipping",
+                content_id, record.get("human_approval_status"),
+            )
+            return
+
+        if record.get("media_review_status") != "approved":
+            logger.info(
+                "[publisher-worker] Content %s media review not approved (status=%s), skipping",
+                content_id, record.get("media_review_status"),
             )
             return
 
