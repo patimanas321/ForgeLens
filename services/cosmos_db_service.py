@@ -119,6 +119,7 @@ async def save_media_metadata(
         "media_review_status": "pending",
         "approval_status": "pending",
         "media_reviewed_at": None,
+        "media_review_score": None,
         "media_reviewer_notes": "",
         "human_reviewed_at": None,
         "human_reviewer_notes": "",
@@ -190,6 +191,7 @@ async def set_media_review_status(
     content_id: str,
     status: str,
     reviewer_notes: str = "",
+    review_score: int | None = None,
 ) -> dict | None:
     """Update generated media review status (agent gate #2)."""
     return await update_content(
@@ -197,6 +199,7 @@ async def set_media_review_status(
         {
             "media_review_status": status,
             "media_reviewed_at": datetime.now(timezone.utc).isoformat(),
+            "media_review_score": review_score,
             "media_reviewer_notes": reviewer_notes,
         },
     )

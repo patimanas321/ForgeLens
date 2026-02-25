@@ -61,7 +61,6 @@ class GenerateVideoInput(BaseModel):
     prompt: str = Field(..., description="Detailed video prompt.")
     duration: int = Field(default=5, ge=3, le=15, description="Duration in seconds.")
     aspect_ratio: str = Field(default="9:16", description="Aspect ratio.")
-    video_model: str = Field(default="", description="'kling' or 'sora'. Empty for default.")
     caption: str = Field(..., description="The full Instagram caption text for this reel.")
     hashtags: list[str] = Field(..., description="List of hashtags (without #) e.g. ['goldenretriever', 'reels'].")
     topic: str = Field(..., description="Brief topic/theme of the reel, e.g. 'morning walk montage'.")
@@ -239,13 +238,15 @@ def build_account_tools(
         resolution: str = "1K",
         output_format: str = "png",
         duration: int = 5,
-        video_model: str = "",
         post_type: str = "post",
         topic: str = "",
         caption: str = "",
         hashtags: list[str] | None = None,
     ) -> dict:
-        model = settings.FAL_VIDEO_MODEL if media_type == "video" else settings.FAL_IMAGE_MODEL
+        if media_type == "video":
+            model = settings.VIDEO_GENERATION_MODEL
+        else:
+            model = settings.IMAGE_GENERATION_MODEL
         doc = await save_media_metadata(
             media_type=media_type,
             blob_url="",
@@ -269,7 +270,6 @@ def build_account_tools(
                 "media_review_status": "pending",
                 "approval_status": "pending",
                 "output_format": output_format,
-                "video_model": video_model,
                 "account": account_name,
                 "source": "account_agent",
             },
@@ -323,7 +323,7 @@ def build_account_tools(
             return {"status": "error", "error": str(e)}
 
     async def generate_video(
-        prompt: str, duration: int = 5, aspect_ratio: str = "9:16", video_model: str = "",
+        prompt: str, duration: int = 5, aspect_ratio: str = "9:16",
         caption: str = "", hashtags: list[str] | None = None, topic: str = "",
     ) -> dict:
         try:
@@ -332,7 +332,6 @@ def build_account_tools(
                 prompt=_truncate_prompt(prompt, MAX_VIDEO_PROMPT_CHARS),
                 aspect_ratio=aspect_ratio,
                 duration=duration,
-                video_model=video_model,
                 post_type="reel",
                 topic=topic,
                 caption=caption,
@@ -381,6 +380,7 @@ def build_account_tools(
             "blob_url": record.get("blob_url", ""),
             "created_at": record.get("created_at"),
             "media_reviewed_at": record.get("media_reviewed_at"),
+            "media_review_score": record.get("media_review_score"),
             "media_reviewer_notes": record.get("media_reviewer_notes", ""),
             "human_reviewed_at": record.get("human_reviewed_at"),
             "human_reviewer_notes": record.get("human_reviewer_notes", ""),

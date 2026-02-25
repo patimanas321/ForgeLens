@@ -16,8 +16,6 @@ import logging
 from azure.identity import DefaultAzureCredential
 from azure.keyvault.secrets import SecretClient
 
-from config.settings import settings
-
 logger = logging.getLogger(__name__)
 
 # Secrets we expect to find in KV
@@ -49,6 +47,8 @@ class KeyVaultStore:
             return
 
         try:
+            from config.settings import settings
+
             credential = DefaultAzureCredential(managed_identity_client_id=settings.AZURE_CLIENT_ID)
             client = SecretClient(vault_url=settings.AZURE_KEYVAULT_URL, credential=credential)
 
@@ -78,7 +78,7 @@ class KeyVaultStore:
             )
 
         except Exception as exc:
-            logger.warning(f"[KV] Key Vault unavailable — falling back to env vars: {exc}")
+            logger.warning(f"[KV] Key Vault unavailable: {exc}")
             self._loaded = True  # Don't retry on every access
 
     def get(self, name: str, default: str = "") -> str:

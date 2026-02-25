@@ -51,31 +51,6 @@ async def _get_openai_client() -> AsyncAzureOpenAI:
     return _openai_client
 
 
-# ---------------------------------------------------------------------------
-# LLM review prompt templates
-# ---------------------------------------------------------------------------
-
-_TEXT_REVIEW_SYSTEM = """You are a content safety and brand compliance reviewer. Analyze the given content and return a JSON object with exactly this structure:
-{
-  "verdict": "APPROVED" | "REJECTED" | "NEEDS_REVISION",
-  "persona_alignment": {"status": "pass" | "concern", "detail": "..."},
-  "sentiment_risk": {"level": "none" | "low" | "medium" | "high", "detail": "..."},
-  "political_angle": {"status": "none" | "detected", "detail": "..."},
-  "vulgarity": {"status": "clean" | "concern", "detail": "..."},
-  "hashtag_safety": {"status": "pass" | "concern", "detail": "..."},
-  "prompt_quality": {"status": "good" | "needs_work", "detail": "..."},
-  "cultural_sensitivity": {"status": "pass" | "concern", "detail": "..."},
-  "summary": "One-paragraph explanation of the verdict"
-}
-
-Rules:
-- REJECT anything with political undertones, even subtle ones
-- REJECT anything that could hurt religious, cultural, or minority sentiments
-- NEEDS_REVISION for minor persona drift or quality issues
-- APPROVE only if everything passes
-- Be specific in your details — explain exactly what the issue is
-Return ONLY the JSON, no markdown fences."""
-
 _IMAGE_REVIEW_SYSTEM = """You are a visual content safety and brand compliance reviewer. You will be shown an image that was generated for an Instagram account. Analyze it and return a JSON object with exactly this structure:
 {
   "verdict": "APPROVED" | "REJECTED" | "NEEDS_REVISION",
@@ -90,9 +65,12 @@ _IMAGE_REVIEW_SYSTEM = """You are a visual content safety and brand compliance r
 }
 
 Rules:
-- REJECT anything visually inappropriate, politically charged, or culturally insensitive
-- NEEDS_REVISION for quality issues or minor brand misalignment
-- APPROVE only if the image is safe, on-brand, and high quality
+- Be advisory-first: prefer APPROVED with concerns for minor quality/style imperfections
+- Use NEEDS_REVISION for moderate quality or brand-alignment issues that are fixable
+- Use REJECTED only for clear harmful/sensitive content, explicit policy violations, or severe deceptive brand misuse
+- Political visuals: reject only if persuasive, partisan, or inflammatory; otherwise mark concern
+- Cultural sensitivity: reject only for clearly harmful/derogatory content; otherwise mark concern
+- Trademark/brand likeness (logos, packaging, pendant/props) should usually be concern + legal caution, not automatic rejection
 - Describe what you actually see in the image
 Return ONLY the JSON, no markdown fences."""
 
@@ -115,41 +93,6 @@ class ReviewTextInput(BaseModel):
 
 class GetReviewGuidelinesInput(BaseModel):
     account_name: str = Field(default="", description="Account name to get persona guidelines for. Leave empty for general guidelines.")
-
-
-# ---------------------------------------------------------------------------
-# Helper: LLM text review
-# ---------------------------------------------------------------------------
-
-async def _llm_review_text(text: str, context: str = "") -> dict:
-    """Call Azure OpenAI to perform nuanced text review."""
-    try:
-        client = await _get_openai_client()
-        user_msg = f"Review the following content:\n\n{text}"
-        if context:
-            user_msg += f"\n\nAdditional context (persona/brand info):\n{context}"
-
-        response = await client.responses.create(
-            model=settings.AZURE_OPENAI_DEPLOYMENT,
-            instructions=_TEXT_REVIEW_SYSTEM,
-            input=user_msg,
-        )
-
-        # Extract text from response
-        result_text = ""
-        for item in response.output:
-            if hasattr(item, "content"):
-                for block in item.content:
-                    if hasattr(block, "text"):
-                        result_text += block.text
-
-        return json.loads(result_text)
-    except json.JSONDecodeError:
-        logger.warning("[content-reviewer] LLM returned non-JSON: %s", result_text[:200])
-        return {"verdict": "NEEDS_REVISION", "summary": f"LLM review parse error. Raw: {result_text[:500]}"}
-    except Exception as e:
-        logger.error("[content-reviewer] LLM text review failed: %s", e)
-        return {"verdict": "NEEDS_REVISION", "summary": f"LLM review error: {e}"}
 
 
 async def _llm_review_image(image_url: str, context: str = "") -> dict:
@@ -225,47 +168,33 @@ def _doc_to_context(doc: dict) -> str:
 async def review_content_plan(content_id: str) -> dict:
     """Review a content plan (Cosmos doc) BEFORE media generation.
 
-    Runs both Azure Content Safety (hard gate) and LLM review (nuanced).
+    Uses Azure Content Safety text scoring as the only gate for text content.
     """
     doc = await get_content_by_id(content_id)
     if not doc:
         return {"error": f"Content {content_id} not found in DB."}
 
     reviewable_text = _doc_to_reviewable_text(doc)
-    context = _doc_to_context(doc)
 
     if not reviewable_text.strip():
         return {"error": "No reviewable text found in document.", "content_id": content_id}
 
-    # Layer 1: Azure Content Safety (hard gate)
+    # Text gate: Azure Content Safety only
     safety_result = analyze_text(reviewable_text)
-
+    mapped_status = "approved" if safety_result.safe else "rejected"
+    notes = "Azure Content Safety text scan"
     if not safety_result.safe:
-        summary = f"Content blocked by Azure Content Safety. Categories flagged: {', '.join(safety_result.blocked_categories)}"
-        return {
-            "content_id": content_id,
-            "verdict": "REJECTED",
-            "reason": "Azure Content Safety hard block",
-            "content_safety": safety_result.as_dict(),
-            "llm_review": None,
-            "summary": summary,
-        }
+        notes = f"Blocked categories: {', '.join(safety_result.blocked_categories)}"
+    elif safety_result.error:
+        notes = f"Azure Content Safety error: {safety_result.error}"
+        mapped_status = "needs_revision"
 
-    # Layer 2: LLM nuanced review
-    llm_result = await _llm_review_text(reviewable_text, context)
-    verdict = str(llm_result.get("verdict", "NEEDS_REVISION")).strip().upper()
-    status_map = {
-        "APPROVED": "approved",
-        "REJECTED": "rejected",
-        "NEEDS_REVISION": "needs_revision",
-    }
+    await set_media_review_status(content_id, mapped_status, notes)
 
     return {
         "content_id": content_id,
-        "verdict": verdict,
         "content_safety": safety_result.as_dict(),
-        "llm_review": llm_result,
-        "summary": llm_result.get("summary", ""),
+        "llm_review": None,
     }
 
 
@@ -273,8 +202,7 @@ async def review_generated_media(content_id: str) -> dict:
     """Review generated media (image/video) AFTER generation.
 
     For images: vision + Content Safety on the blob URL.
-    For videos: Content Safety on thumbnail / first frame if available,
-                plus LLM review of the associated text metadata.
+    For videos: Azure Content Safety text scoring on metadata only.
     """
     doc = await get_content_by_id(content_id)
     if not doc:
@@ -304,12 +232,13 @@ async def review_generated_media(content_id: str) -> dict:
 
         if not image_safety.safe:
             summary = f"Image blocked by Azure Content Safety. Categories: {', '.join(image_safety.blocked_categories)}"
-            await set_media_review_status(content_id, "rejected", summary)
+            await set_media_review_status(content_id, "rejected", summary, review_score=0)
             result["verdict"] = "REJECTED"
             result["summary"] = summary
             return result
 
     # Also check the text metadata
+    text_safety = analyze_text("")
     reviewable_text = _doc_to_reviewable_text(doc)
     if reviewable_text.strip():
         text_safety = analyze_text(reviewable_text)
@@ -317,31 +246,42 @@ async def review_generated_media(content_id: str) -> dict:
 
         if not text_safety.safe:
             summary = f"Text metadata blocked by Content Safety. Categories: {', '.join(text_safety.blocked_categories)}"
-            await set_media_review_status(content_id, "rejected", summary)
-            result["verdict"] = "REJECTED"
-            result["summary"] = summary
+            await set_media_review_status(content_id, "rejected", summary, review_score=0)
+            result["content_safety"] = text_safety.as_dict()
             return result
 
-    # Layer 2: LLM vision review (images only — videos get text-only review)
+    # Layer 2: LLM vision review for images only.
     if media_type == "image" and blob_url:
         llm_result = await _llm_review_image(blob_url, context)
         result["llm_visual_review"] = llm_result
+        verdict = str(llm_result.get("verdict", "NEEDS_REVISION")).strip().upper()
+        raw_score = llm_result.get("overall_score")
+        review_score = None
+        try:
+            if raw_score is not None:
+                review_score = max(0, min(100, int(raw_score)))
+        except Exception:
+            review_score = None
+        if verdict == "APPROVED":
+            mapped_status = "approved"
+        elif verdict == "REJECTED":
+            mapped_status = "rejected"
+        else:
+            mapped_status = "needs_revision"
+        await set_media_review_status(content_id, mapped_status, llm_result.get("summary", ""), review_score=review_score)
+
+        result["verdict"] = verdict
+        result["summary"] = llm_result.get("summary", "")
     else:
-        # For video: review the text metadata only (vision on keyframes is a future enhancement)
-        llm_result = await _llm_review_text(reviewable_text, context + " [This is a video — visual review not available, reviewing text metadata only.]")
-        result["llm_text_review"] = llm_result
+        mapped_status = "approved" if text_safety.safe else "rejected"
+        notes = "Azure Content Safety text scan"
+        if text_safety.error:
+            mapped_status = "needs_revision"
+            notes = f"Azure Content Safety error: {text_safety.error}"
+        await set_media_review_status(content_id, mapped_status, notes, review_score=None)
+        result["llm_text_review"] = None
+        result["content_safety"] = text_safety.as_dict()
 
-    verdict = str(llm_result.get("verdict", "NEEDS_REVISION")).strip().upper()
-    status_map = {
-        "APPROVED": "approved",
-        "REJECTED": "rejected",
-        "NEEDS_REVISION": "needs_revision",
-    }
-    mapped_status = status_map.get(verdict, "needs_revision")
-    await set_media_review_status(content_id, mapped_status, llm_result.get("summary", ""))
-
-    result["verdict"] = verdict
-    result["summary"] = llm_result.get("summary", "")
     return result
 
 
@@ -353,25 +293,12 @@ async def review_text(text: str) -> dict:
     if not text or not text.strip():
         return {"error": "No text provided."}
 
-    # Layer 1: Content Safety
+    # Text review: Azure Content Safety only
     safety_result = analyze_text(text)
 
-    if not safety_result.safe:
-        return {
-            "verdict": "REJECTED",
-            "content_safety": safety_result.as_dict(),
-            "llm_review": None,
-            "summary": f"Text blocked by Azure Content Safety. Categories: {', '.join(safety_result.blocked_categories)}",
-        }
-
-    # Layer 2: LLM review
-    llm_result = await _llm_review_text(text)
-
     return {
-        "verdict": llm_result.get("verdict", "NEEDS_REVISION"),
         "content_safety": safety_result.as_dict(),
-        "llm_review": llm_result,
-        "summary": llm_result.get("summary", ""),
+        "llm_review": None,
     }
 
 
@@ -418,9 +345,8 @@ def build_content_reviewer_tools() -> list[FunctionTool]:
             name="review_content_plan",
             description=(
                 "Review a content plan (Cosmos DB record) BEFORE media generation. "
-                "Checks prompt, caption, hashtags, and topic for safety, brand alignment, "
-                "political content, sentiment risk, and vulgarity. "
-                "Returns verdict: APPROVED / REJECTED / NEEDS_REVISION."
+                "Uses Azure Content Safety text scores only for prompt/caption/hashtags/topic. "
+                "Returns only raw content_safety fields from the service."
             ),
             input_model=ReviewContentPlanInput,
             func=review_content_plan,
@@ -430,8 +356,8 @@ def build_content_reviewer_tools() -> list[FunctionTool]:
             description=(
                 "Review generated media (image or video) AFTER generation. "
                 "For images: analyzes the actual image via vision + Content Safety API. "
-                "For videos: reviews text metadata (visual keyframe review is future enhancement). "
-                "Returns verdict: APPROVED / REJECTED / NEEDS_REVISION."
+                "For videos: uses Azure Content Safety text scores on metadata only. "
+                "Returns raw content_safety fields for text path; image path includes vision review output."
             ),
             input_model=ReviewGeneratedMediaInput,
             func=review_generated_media,
@@ -439,8 +365,8 @@ def build_content_reviewer_tools() -> list[FunctionTool]:
         FunctionTool(
             name="review_text",
             description=(
-                "Review arbitrary text for safety — useful for ad-hoc checks on "
-                "captions, prompts, hashtags, or any text content."
+                "Review arbitrary text using Azure Content Safety scores only. "
+                "Returns only raw content_safety fields from the service."
             ),
             input_model=ReviewTextInput,
             func=review_text,
