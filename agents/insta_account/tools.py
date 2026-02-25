@@ -18,7 +18,7 @@ from tavily import AsyncTavilyClient
 from account_profile import AccountProfile
 from config.settings import settings
 from services.azure_bus_service import send_message_to_media_generation_queue
-from services.cosmos_db_service import save_media_metadata, update_content
+from services.cosmos_db_service import delete_media_metadata, save_media_metadata
 from services.instagram_service import InstagramService
 from services.cosmos_db_service import get_content_by_id, query_content
 
@@ -69,10 +69,6 @@ class GenerateVideoInput(BaseModel):
 
 class GetReviewStatusInput(BaseModel):
     item_id: str = Field(..., description="The content ID to check status for.")
-
-
-class SubmitForGenerationInput(BaseModel):
-    content_id: str = Field(..., description="The content ID (from generate_image/generate_video) to submit for generation after reviewer approval.")
 
 
 # ---------------------------------------------------------------------------
@@ -268,8 +264,8 @@ def build_account_tools(
             hashtags=hashtags,
             publish_status="pending",
             extra={
-                "generation_status": "pending_review",
-                "prompt_review_status": "pending",
+                "generation_status": "queued",
+                "generation_requested_at": datetime.now(timezone.utc).isoformat(),
                 "media_review_status": "pending",
                 "approval_status": "pending",
                 "output_format": output_format,
@@ -279,29 +275,12 @@ def build_account_tools(
             },
         )
         logger.info(
-            "[account:%s] Saved content plan %s (type=%s) — pending review",
+            "[account:%s] Saved reviewed content plan %s (type=%s) — queued",
             account_name,
             doc["id"],
             media_type,
         )
         return doc
-
-    async def _submit_to_queue(content_id: str, media_type: str) -> None:
-        await update_content(content_id, {
-            "generation_status": "queued",
-            "generation_requested_at": datetime.now(timezone.utc).isoformat(),
-        })
-        try:
-            await send_message_to_media_generation_queue(
-                content_id=content_id,
-                media_type=media_type,
-                account=account_name,
-                subject="Media Generation",
-                message_id=content_id,
-            )
-        except Exception:
-            await update_content(content_id, {"generation_status": "pending_review"})
-            raise
 
     async def generate_image(
         prompt: str, aspect_ratio: str = "4:5", resolution: str = "1K", output_format: str = "png",
@@ -319,13 +298,24 @@ def build_account_tools(
                 caption=caption,
                 hashtags=hashtags,
             )
+            try:
+                await send_message_to_media_generation_queue(
+                    content_id=doc["id"],
+                    media_type="image",
+                    account=account_name,
+                    subject="Media Generation",
+                    message_id=doc["id"],
+                )
+            except Exception as queue_error:
+                await delete_media_metadata(doc["id"], "image")
+                logger.error("Image generation queue failed; rolled back DB record: %s", queue_error)
+                return {"status": "error", "error": str(queue_error)}
             return {
-                "status": "pending_review",
+                "status": "queued",
                 "content_id": doc["id"],
                 "message": (
-                    "Content plan saved to DB. Now call the Content Reviewer agent "
-                    "with this content_id to review it. If approved, call "
-                    "submit_for_generation to queue the actual image generation."
+                    "Content saved and queued for generation. "
+                    "Use get_review_status(content_id) to track progress."
                 ),
             }
         except Exception as e:
@@ -348,13 +338,24 @@ def build_account_tools(
                 caption=caption,
                 hashtags=hashtags,
             )
+            try:
+                await send_message_to_media_generation_queue(
+                    content_id=doc["id"],
+                    media_type="video",
+                    account=account_name,
+                    subject="Media Generation",
+                    message_id=doc["id"],
+                )
+            except Exception as queue_error:
+                await delete_media_metadata(doc["id"], "video")
+                logger.error("Video generation queue failed; rolled back DB record: %s", queue_error)
+                return {"status": "error", "error": str(queue_error)}
             return {
-                "status": "pending_review",
+                "status": "queued",
                 "content_id": doc["id"],
                 "message": (
-                    "Content plan saved to DB. Now call the Content Reviewer agent "
-                    "with this content_id to review it. If approved, call "
-                    "submit_for_generation to queue the actual video generation."
+                    "Content saved and queued for generation. "
+                    "Use get_review_status(content_id) to track progress."
                 ),
             }
         except Exception as e:
@@ -373,61 +374,17 @@ def build_account_tools(
             return {"error": "Access denied for this account"}
         return {
             "id": record["id"],
-            "prompt_review_status": record.get("prompt_review_status", "unknown"),
             "media_review_status": record.get("media_review_status", "unknown"),
             "approval_status": record.get("approval_status", "unknown"),
             "generation_status": record.get("generation_status", "unknown"),
             "publish_status": record.get("publish_status", "pending"),
             "blob_url": record.get("blob_url", ""),
             "created_at": record.get("created_at"),
-            "prompt_reviewed_at": record.get("prompt_reviewed_at"),
-            "prompt_reviewer_notes": record.get("prompt_reviewer_notes", ""),
             "media_reviewed_at": record.get("media_reviewed_at"),
             "media_reviewer_notes": record.get("media_reviewer_notes", ""),
             "human_reviewed_at": record.get("human_reviewed_at"),
             "human_reviewer_notes": record.get("human_reviewer_notes", ""),
         }
-
-    # ------------------------------------------------------------------
-    # Submit for generation (after Content Reviewer approval)
-    # ------------------------------------------------------------------
-
-    async def submit_for_generation(content_id: str) -> dict:
-        """Submit an already-reviewed content plan to the generation queue.
-
-        Call this ONLY after the Content Reviewer has approved the content plan.
-        """
-        record = await get_content_by_id(content_id)
-        if not record:
-            return {"status": "error", "error": f"Content {content_id} not found."}
-
-        gen_status = record.get("generation_status", "")
-        if gen_status not in ("pending_review",):
-            return {
-                "status": "error",
-                "error": f"Content {content_id} is in '{gen_status}' state, not 'pending_review'. Cannot submit.",
-            }
-
-        prompt_status = record.get("prompt_review_status", "pending")
-        if prompt_status != "approved":
-            return {
-                "status": "error",
-                "error": (
-                    f"Content {content_id} prompt review is '{prompt_status}'. "
-                    "Must be 'approved' before generation submission."
-                ),
-            }
-
-        try:
-            await _submit_to_queue(content_id, record.get("media_type", "image"))
-            return {
-                "status": "queued",
-                "content_id": content_id,
-                "message": "Content approved and submitted to generation queue. Background worker will generate the media.",
-            }
-        except Exception as e:
-            logger.error(f"[account] submit_for_generation failed for {content_id}: {e}")
-            return {"status": "error", "error": str(e)}
 
     # ------------------------------------------------------------------
     # Assemble
@@ -454,13 +411,13 @@ def build_account_tools(
         ),
         FunctionTool(
             name="generate_image",
-            description="Submit an image generation request. Returns content_id immediately — generation happens in background.",
+            description="Create DB entry and queue image generation. Call Content Reviewer agent first before using this tool.",
             input_model=GenerateImageInput,
             func=generate_image,
         ),
         FunctionTool(
             name="generate_video",
-            description="Submit a video generation request. Returns content_id immediately — generation happens in background.",
+            description="Create DB entry and queue video generation. Call Content Reviewer agent first before using this tool.",
             input_model=GenerateVideoInput,
             func=generate_video,
         ),
@@ -469,14 +426,5 @@ def build_account_tools(
             description="Check the current generation/approval/publish status of a content item by its ID.",
             input_model=GetReviewStatusInput,
             func=get_review_status,
-        ),
-        FunctionTool(
-            name="submit_for_generation",
-            description=(
-                "Submit a content plan for actual media generation AFTER the Content Reviewer "
-                "has approved it. Only works on content with generation_status='pending_review'."
-            ),
-            input_model=SubmitForGenerationInput,
-            func=submit_for_generation,
         ),
     ]
