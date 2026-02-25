@@ -43,10 +43,9 @@ class InstaAccountAgent(BaseAgent):
         super().__init__(chat_client, child_agents=child_agents)
 
         logger.info(
-            "[account] Created agent: %s (%s) with %d total tools",
+            "[account] Created agent: %s (%s)",
             profile.display_name,
             profile.account_name,
-            len(self._agent.tools),
         )
 
     # ------------------------------------------------------------------
