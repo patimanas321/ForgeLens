@@ -86,9 +86,26 @@ On failure:
 **Suggested Action:** [retry / check media URL / check access token]
 ```
 
+## Content Safety Review (via Content Reviewer Agent)
+
+You have access to the **Content Reviewer** agent via `call_content_reviewer`.
+
+**Before publishing ANY content**, you MUST delegate to the Content Reviewer:
+
+1. Get the content record via `get_content_details`
+2. Call `call_content_reviewer` with: `"Review generated media for content_id=<id>"`
+3. The reviewer will check the image/video using Azure Content Safety + LLM vision analysis
+4. Based on the verdict:
+   - **APPROVED** → proceed to publish
+   - **REJECTED** → do NOT publish. Report the rejection reason.
+   - **NEEDS_REVISION** → do NOT publish. Relay the feedback.
+
+**This is mandatory. Never skip the content review step.**
+
 ## Rules
 
 - **Only publish approved items.** Never bypass DB approval status.
+- **Always call Content Reviewer before publishing.** If review returns REJECTED or NEEDS_REVISION, do NOT publish — report the issue.
 - The media URL must be **publicly accessible** for Instagram's servers to fetch it.
 - For reels, wait adequate time for processing (check status every 30 seconds, up to 5 minutes).
 - If publishing fails due to a temporary error, note it for retry — don't give up immediately.

@@ -39,7 +39,7 @@ The **MediaGenerationWorker** (background thread) has two concurrent loops:
 
 ### Content Pipeline (Sequential Workflow)
 
-`agents/account/workflow.py` runs **Trend Scout** via MAF `SequentialBuilder` for automated trend discovery.
+`agents/insta_account/workflow.py` runs **Trend Scout** via MAF `SequentialBuilder` for automated trend discovery.
 
 ### Queue-Triggered Workers
 
@@ -53,13 +53,13 @@ All three are started as background workers in `main.py`.
 
 ## Agents Reference
 
-| Agent                    | ID             | Source                         | Prompt                              | Tools                                                          |
-| ------------------------ | -------------- | ------------------------------ | ----------------------------------- | -------------------------------------------------------------- |
-| **Account Agent** (Oreo) | per-profile    | `agents/account/agent.py`      | `agents/account/prompt_template.md` | `agents/account/tools.py` + `agents/account/internal_tools.py` |
-| **Trend Scout**          | `trend-scout`  | `agents/trend_scout/agent.py`  | `agents/trend_scout/prompt.md`      | `agents/trend_scout/tools.py` (Tavily search/extract)          |
-| **Approver**             | `review-queue` | `agents/approver/agent.py`     | `agents/approver/prompt.md`         | `agents/approver/tools.py` (approve/reject/view/request edits) |
-| **Communicator**         | `communicator` | `agents/communicator/agent.py` | `agents/communicator/prompt.md`     | `agents/communicator/tools.py` (email via ACS)                 |
-| **Publisher**            | `publisher`    | `agents/publisher/agent.py`    | `agents/publisher/prompt.md`        | `agents/publisher/tools.py` (Instagram Graph API publish)      |
+| Agent                    | ID             | Source                          | Prompt                                    | Tools                                                                      |
+| ------------------------ | -------------- | ------------------------------- | ----------------------------------------- | -------------------------------------------------------------------------- |
+| **Account Agent** (Oreo) | per-profile    | `agents/insta_account/agent.py` | `agents/insta_account/prompt_template.md` | `agents/insta_account/tools.py` + `agents/insta_account/internal_tools.py` |
+| **Trend Scout**          | `trend-scout`  | `agents/trend_scout/agent.py`   | `agents/trend_scout/prompt.md`            | `agents/trend_scout/tools.py` (Tavily search/extract)                      |
+| **Approver**             | `review-queue` | `agents/approver/agent.py`      | `agents/approver/prompt.md`               | `agents/approver/tools.py` (approve/reject/view/request edits)             |
+| **Communicator**         | `communicator` | `agents/communicator/agent.py`  | `agents/communicator/prompt.md`           | `agents/communicator/tools.py` (email via ACS)                             |
+| **Publisher**            | `publisher`    | `agents/publisher/agent.py`     | `agents/publisher/prompt.md`              | `agents/publisher/tools.py` (Instagram Graph API publish)                  |
 
 ### Background Workers (Not Agents)
 

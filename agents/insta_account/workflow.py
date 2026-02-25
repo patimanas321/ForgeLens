@@ -9,7 +9,7 @@ import logging
 
 from agent_framework import SequentialBuilder, WorkflowAgent
 
-from base_agent import BaseAgent
+from agents.base_agent import BaseAgent
 
 logger = logging.getLogger(__name__)
 

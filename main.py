@@ -31,8 +31,8 @@ import uvicorn
 
 from config.settings import settings
 from account_profile import load_all_profiles
-from agents.account.agent import InstaAccountAgent
-from agents.account.workflow import build_content_pipeline
+from agents.insta_account.agent import InstaAccountAgent
+from agents.insta_account.workflow import build_content_pipeline
 from agents.trend_scout.agent import TrendScoutAgent
 from agents.approver.agent import ReviewQueueAgent
 from agents.publisher.agent import PublisherAgent
@@ -86,8 +86,8 @@ def main():
     # Content Reviewer — safety & quality gate (used by account + publisher agents)
     content_reviewer_agent = ContentReviewerAgent(ai_client)
 
-    # Publisher is standalone: queue listener + content_id publisher
-    publisher_agent = PublisherAgent(ai_client)
+    # Publisher — delegates to Content Reviewer for post-generation safety gate
+    publisher_agent = PublisherAgent(ai_client, child_agents=[content_reviewer_agent])
 
     # --- Discover account profiles and create one agent per account ---
     profiles = load_all_profiles()
@@ -105,6 +105,7 @@ def main():
             profile,
             child_agents=[
                 trend_scout_agent,
+                content_reviewer_agent,
             ],
         )
         account_agents.append(agent)

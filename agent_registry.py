@@ -12,6 +12,7 @@ from enum import Enum
 class Agent(str, Enum):
     """Canonical agent identifiers — used as ChatAgent.id values."""
     ORCHESTRATOR = "orchestrator"
+    INSTA_ACCOUNT = "insta-account"
     TREND_SCOUT = "trend-scout"
     REVIEW_QUEUE = "review-queue"
     CONTENT_REVIEWER = "content-reviewer"
@@ -36,6 +37,16 @@ AGENT_REGISTRY: dict[Agent, AgentEntry] = {
             "Main coordinator that runs the daily Instagram workflow: "
             "discover trends → plan content → generate media → write copy → "
             "queue for human review → publish upon approval → track analytics."
+        ),
+    ),
+
+    # ---- Instagram Account Agent (per-profile, template entry) ----
+    Agent.INSTA_ACCOUNT: AgentEntry(
+        name="Instagram Account",
+        description=(
+            "Per-profile Instagram account agent. Manages content creation, "
+            "trend discovery, media generation, and review workflow for a "
+            "single Instagram persona."
         ),
     ),
 

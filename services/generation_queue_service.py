@@ -41,6 +41,110 @@ class GenerationQueueService:
             )
         return cls._client_instance
 
+    async def create_content_record(
+        self,
+        *,
+        media_type: str,
+        prompt: str,
+        aspect_ratio: str = "1:1",
+        resolution: str = "1K",
+        output_format: str = "png",
+        duration: int = 5,
+        video_model: str = "",
+        post_type: str = "post",
+        target_account_id: str = "",
+        target_account_name: str = "",
+        topic: str = "",
+        caption: str = "",
+        hashtags: list[str] | None = None,
+    ) -> dict:
+        """Create a DB record for a content plan WITHOUT queuing for generation.
+
+        The record is saved with ``generation_status='pending_review'`` so the
+        Content Reviewer agent can inspect it before generation begins.
+        Call :meth:`submit_to_queue` after the reviewer approves.
+
+        Returns the DB document with ``id`` (content_id).
+        """
+        model = (
+            settings.FAL_VIDEO_MODEL if media_type == "video" else settings.FAL_IMAGE_MODEL
+        )
+
+        doc = await save_media_metadata(
+            media_type=media_type,
+            blob_url="",
+            blob_name="",
+            prompt=prompt,
+            model=model,
+            aspect_ratio=aspect_ratio,
+            resolution="" if media_type == "video" else resolution,
+            duration_seconds=duration if media_type == "video" else None,
+            fal_url="",
+            post_type=post_type,
+            target_account_id=target_account_id,
+            target_account_name=target_account_name,
+            description=topic,
+            caption=caption,
+            hashtags=hashtags,
+            approval_status="pending_review",
+            publish_status="pending",
+            extra={
+                "generation_status": "pending_review",
+                "output_format": output_format,
+                "video_model": video_model,
+                "account": self._account,
+                "source": "account_agent",
+            },
+        )
+
+        logger.info(
+            "[generation-queue] Saved content plan %s (account=%s, type=%s) — pending review",
+            doc["id"], self._account, media_type,
+        )
+        return doc
+
+    async def submit_to_queue(self, content_id: str, media_type: str) -> None:
+        """Send a generation request to Service Bus for an existing DB record.
+
+        Called after the Content Reviewer approves the content plan.
+        """
+        from services.media_metadata_service import update_content
+
+        # Mark as queued in DB
+        await update_content(content_id, {
+            "generation_status": "queued",
+            "approval_status": "approved_by_reviewer",
+            "generation_requested_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+        try:
+            client = self._get_client()
+            sender = client.get_queue_sender(QUEUE_GENERATION)
+            async with sender:
+                msg = ServiceBusMessage(
+                    body=json.dumps({"content_id": content_id}),
+                    application_properties={
+                        "content_id": content_id,
+                        "media_type": media_type,
+                        "account": self._account,
+                    },
+                    subject="Media Generation",
+                    message_id=content_id,
+                )
+                await sender.send_messages(msg)
+        except Exception as exc:
+            # Revert status so it can be retried
+            await update_content(content_id, {"generation_status": "pending_review"})
+            logger.error(
+                "[generation-queue] Service Bus send failed for %s: %s", content_id, exc,
+            )
+            raise
+
+        logger.info(
+            "[generation-queue] Enqueued %s generation %s (account=%s)",
+            media_type, content_id, self._account,
+        )
+
     async def submit_generation(
         self,
         *,

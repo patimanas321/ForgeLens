@@ -1,7 +1,7 @@
 """Trend Scout agent — discovers trends and viral content via Tavily web search."""
 
 from agent_registry import Agent
-from base_agent import BaseAgent
+from agents.base_agent import BaseAgent
 from .tools import build_trend_scout_tools
 
 
