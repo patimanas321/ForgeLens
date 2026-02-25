@@ -24,13 +24,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
-from azure.identity.aio import DefaultAzureCredential
-from azure.servicebus import ServiceBusMessage
-from azure.servicebus.aio import ServiceBusClient
 from fal_client.client import AsyncClient as FalAsyncClient, Completed
 
 from config.settings import settings
-from services.media_metadata_service import (
+from services.azure_bus_service import (
+    get_media_generation_queue_receiver,
+    receive_messages_from_media_generation_queue,
+    send_message_to_review_pending_queue,
+)
+from services.cosmos_db_service import (
     get_content_by_id,
     query_content,
     update_content,
@@ -146,36 +148,27 @@ class MediaGenerationWorker:
 
     async def _listen_queue(self) -> None:
         """Consume media-generation queue messages and submit to fal.ai."""
-        credential = DefaultAzureCredential(
-            managed_identity_client_id=settings.AZURE_CLIENT_ID
-        )
-        sb_client = ServiceBusClient(
-            fully_qualified_namespace=settings.SERVICEBUS_NAMESPACE,
-            credential=credential,
-        )
-
-        async with sb_client:
-            receiver = sb_client.get_queue_receiver(
-                QUEUE_GENERATION, max_wait_time=5,
-            )
-            async with receiver:
-                while True:
-                    messages = await receiver.receive_messages(
-                        max_message_count=10, max_wait_time=5,
-                    )
-                    for msg in messages:
-                        try:
-                            body = json.loads(str(msg))
-                            content_id = body["content_id"]
-                            await self._submit_to_fal(content_id)
-                            await receiver.complete_message(msg)
-                        except Exception as exc:
-                            logger.error(
-                                "[gen-worker] Failed to process message: %s", exc
-                            )
-                            # Don't complete — let it retry
-                    if not messages:
-                        await asyncio.sleep(2)
+        receiver = get_media_generation_queue_receiver(max_wait_time=5)
+        async with receiver:
+            while True:
+                messages = await receive_messages_from_media_generation_queue(
+                    receiver,
+                    max_message_count=10,
+                    max_wait_time=5,
+                )
+                for msg in messages:
+                    try:
+                        body = json.loads(str(msg))
+                        content_id = body["content_id"]
+                        await self._submit_to_fal(content_id)
+                        await receiver.complete_message(msg)
+                    except Exception as exc:
+                        logger.error(
+                            "[gen-worker] Failed to process message: %s", exc
+                        )
+                        # Don't complete — let it retry
+                if not messages:
+                    await asyncio.sleep(2)
 
     async def _submit_to_fal(self, content_id: str) -> None:
         """Read DB record and submit an async request to fal.ai."""
@@ -229,7 +222,7 @@ class MediaGenerationWorker:
     async def _check_submitted_items(self) -> None:
         """Query DB for generation_status='submitted' and check fal.ai."""
         # Use a cross-partition query for generation_status
-        from services.media_metadata_service import _get_container
+        from services.cosmos_db_service import _get_container
 
         container = await _get_container()
         query = (
@@ -328,27 +321,13 @@ class MediaGenerationWorker:
 
         # Enqueue for human review via Service Bus
         try:
-            credential = DefaultAzureCredential(
-                managed_identity_client_id=settings.AZURE_CLIENT_ID
+            await send_message_to_review_pending_queue(
+                content_id=content_id,
+                media_type=media_type,
+                account=record.get("account", ""),
+                subject=record.get("description") or "Instagram Post",
+                message_id=f"{content_id}-review",
             )
-            sb_client = ServiceBusClient(
-                fully_qualified_namespace=settings.SERVICEBUS_NAMESPACE,
-                credential=credential,
-            )
-            async with sb_client:
-                sender = sb_client.get_queue_sender(QUEUE_REVIEW_PENDING)
-                async with sender:
-                    msg = ServiceBusMessage(
-                        body=json.dumps({"content_id": content_id}),
-                        application_properties={
-                            "content_id": content_id,
-                            "media_type": media_type,
-                            "account": record.get("account", ""),
-                        },
-                        subject=record.get("description") or "Instagram Post",
-                        message_id=f"{content_id}-review",
-                    )
-                    await sender.send_messages(msg)
             logger.info(
                 "[gen-worker] Enqueued %s for review → review-pending queue",
                 content_id,

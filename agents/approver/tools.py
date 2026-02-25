@@ -6,18 +6,14 @@ On approve, a message is forwarded to the review-approved Service Bus queue
 so the Publisher worker can pick it up.
 """
 
-import json
 import logging
 from datetime import datetime, timezone
 
 from agent_framework import FunctionTool
-from azure.identity.aio import DefaultAzureCredential
-from azure.servicebus import ServiceBusMessage
-from azure.servicebus.aio import ServiceBusClient
 from pydantic import BaseModel, Field
 
-from config.settings import settings
-from services.media_metadata_service import (
+from services.azure_bus_service import send_message_to_review_approved_queue
+from services.cosmos_db_service import (
     get_content_by_id,
     query_content,
     set_approval_status,
@@ -26,24 +22,6 @@ from services.media_metadata_service import (
 logger = logging.getLogger(__name__)
 
 QUEUE_APPROVED = "review-approved"
-
-# Singleton Service Bus client (only used for approve → publish forwarding)
-_sb_client: ServiceBusClient | None = None
-_sb_credential: DefaultAzureCredential | None = None
-
-
-async def _get_sb_client() -> ServiceBusClient:
-    global _sb_client, _sb_credential
-    if _sb_client is None:
-        _sb_credential = DefaultAzureCredential(
-            managed_identity_client_id=settings.AZURE_CLIENT_ID
-        )
-        _sb_client = ServiceBusClient(
-            fully_qualified_namespace=settings.SERVICEBUS_NAMESPACE,
-            credential=_sb_credential,
-        )
-    return _sb_client
-
 
 # ------------------------------------------------------------------
 # Input schemas
@@ -148,21 +126,13 @@ async def approve_item(item_id: str, notes: str = "") -> dict:
 
     # Forward to review-approved Service Bus queue for publisher
     try:
-        client = await _get_sb_client()
-        sender = client.get_queue_sender(QUEUE_APPROVED)
-        async with sender:
-            msg = ServiceBusMessage(
-                body=json.dumps({"content_id": item_id}),
-                application_properties={
-                    "item_id": item_id,
-                    "account": item.get("account")
-                    or item.get("target_account_name", ""),
-                    "content_type": item.get("media_type", "image"),
-                },
-                subject=item.get("description") or "Instagram Post",
-                message_id=f"{item_id}-approved",
-            )
-            await sender.send_messages(msg)
+        await send_message_to_review_approved_queue(
+            item_id=item_id,
+            account=item.get("account") or item.get("target_account_name", ""),
+            content_type=item.get("media_type", "image"),
+            subject=item.get("description") or "Instagram Post",
+            message_id=f"{item_id}-approved",
+        )
         logger.info(
             "[approver] Approved %s and forwarded to review-approved queue", item_id
         )

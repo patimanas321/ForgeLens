@@ -13,11 +13,11 @@ import logging
 import threading
 from typing import Any
 
-from azure.identity.aio import DefaultAzureCredential
-from azure.servicebus.aio import ServiceBusClient
-
-from config.settings import settings
-from services.media_metadata_service import get_content_by_id, update_content
+from services.azure_bus_service import (
+    get_review_pending_queue_receiver,
+    receive_messages_from_review_pending_queue,
+)
+from services.cosmos_db_service import get_content_by_id, update_content
 from services.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
@@ -36,48 +36,39 @@ class CommunicatorQueueWorker:
         self._notification_service = NotificationService()
 
     async def run_forever(self) -> None:
-        credential = DefaultAzureCredential(
-            managed_identity_client_id=settings.AZURE_CLIENT_ID
-        )
-        sb_client = ServiceBusClient(
-            fully_qualified_namespace=settings.SERVICEBUS_NAMESPACE,
-            credential=credential,
-        )
-
-        async with sb_client:
-            receiver = sb_client.get_queue_receiver(
-                QUEUE_REVIEW_PENDING, max_wait_time=5,
-            )
-            async with receiver:
-                while True:
-                    try:
-                        messages = await receiver.receive_messages(
-                            max_message_count=10, max_wait_time=5,
-                        )
-                        for msg in messages:
-                            try:
-                                body = json.loads(str(msg))
-                                content_id = body.get("content_id")
-                                if not content_id:
-                                    logger.warning("[communicator-worker] Message missing content_id, completing")
-                                    await receiver.complete_message(msg)
-                                    continue
-
-                                await self._process(content_id)
+        receiver = get_review_pending_queue_receiver(max_wait_time=5)
+        async with receiver:
+            while True:
+                try:
+                    messages = await receive_messages_from_review_pending_queue(
+                        receiver,
+                        max_message_count=10,
+                        max_wait_time=5,
+                    )
+                    for msg in messages:
+                        try:
+                            body = json.loads(str(msg))
+                            content_id = body.get("content_id")
+                            if not content_id:
+                                logger.warning("[communicator-worker] Message missing content_id, completing")
                                 await receiver.complete_message(msg)
+                                continue
 
-                            except Exception as exc:
-                                logger.error(
-                                    "[communicator-worker] Failed to process message: %s", exc,
-                                )
-                                # Don't complete — let it retry
+                            await self._process(content_id)
+                            await receiver.complete_message(msg)
 
-                        if not messages:
-                            await asyncio.sleep(self._poll_interval)
+                        except Exception as exc:
+                            logger.error(
+                                "[communicator-worker] Failed to process message: %s", exc,
+                            )
+                            # Don't complete — let it retry
 
-                    except Exception as exc:
-                        logger.error("[communicator-worker] Listener tick failed: %s", exc)
+                    if not messages:
                         await asyncio.sleep(self._poll_interval)
+
+                except Exception as exc:
+                    logger.error("[communicator-worker] Listener tick failed: %s", exc)
+                    await asyncio.sleep(self._poll_interval)
 
     async def _process(self, content_id: str) -> None:
         """Read DB record, invoke Communicator agent, update notification flag."""

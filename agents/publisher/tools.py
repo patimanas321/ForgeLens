@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from config.settings import settings
 from services.instagram_service import InstagramService
-from services.media_metadata_service import (
+from services.cosmos_db_service import (
     get_content_by_id,
     mark_content_published,
     query_content,

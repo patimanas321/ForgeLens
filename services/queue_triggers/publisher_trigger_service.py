@@ -13,11 +13,11 @@ import logging
 import threading
 from typing import Any
 
-from azure.identity.aio import DefaultAzureCredential
-from azure.servicebus.aio import ServiceBusClient
-
-from config.settings import settings
-from services.media_metadata_service import get_content_by_id
+from services.azure_bus_service import (
+    get_review_approved_queue_receiver,
+    receive_messages_from_review_approved_queue,
+)
+from services.cosmos_db_service import get_content_by_id
 
 logger = logging.getLogger(__name__)
 
@@ -34,48 +34,39 @@ class PublisherQueueWorker:
         self._poll_interval = poll_interval_seconds
 
     async def run_forever(self) -> None:
-        credential = DefaultAzureCredential(
-            managed_identity_client_id=settings.AZURE_CLIENT_ID
-        )
-        sb_client = ServiceBusClient(
-            fully_qualified_namespace=settings.SERVICEBUS_NAMESPACE,
-            credential=credential,
-        )
-
-        async with sb_client:
-            receiver = sb_client.get_queue_receiver(
-                QUEUE_REVIEW_APPROVED, max_wait_time=5,
-            )
-            async with receiver:
-                while True:
-                    try:
-                        messages = await receiver.receive_messages(
-                            max_message_count=5, max_wait_time=5,
-                        )
-                        for msg in messages:
-                            try:
-                                body = json.loads(str(msg))
-                                content_id = body.get("content_id")
-                                if not content_id:
-                                    logger.warning("[publisher-worker] Message missing content_id, completing")
-                                    await receiver.complete_message(msg)
-                                    continue
-
-                                await self._process(content_id)
+        receiver = get_review_approved_queue_receiver(max_wait_time=5)
+        async with receiver:
+            while True:
+                try:
+                    messages = await receive_messages_from_review_approved_queue(
+                        receiver,
+                        max_message_count=5,
+                        max_wait_time=5,
+                    )
+                    for msg in messages:
+                        try:
+                            body = json.loads(str(msg))
+                            content_id = body.get("content_id")
+                            if not content_id:
+                                logger.warning("[publisher-worker] Message missing content_id, completing")
                                 await receiver.complete_message(msg)
+                                continue
 
-                            except Exception as exc:
-                                logger.error(
-                                    "[publisher-worker] Failed to process message: %s", exc,
-                                )
-                                # Don't complete — let it retry
+                            await self._process(content_id)
+                            await receiver.complete_message(msg)
 
-                        if not messages:
-                            await asyncio.sleep(self._poll_interval)
+                        except Exception as exc:
+                            logger.error(
+                                "[publisher-worker] Failed to process message: %s", exc,
+                            )
+                            # Don't complete — let it retry
 
-                    except Exception as exc:
-                        logger.error("[publisher-worker] Listener tick failed: %s", exc)
+                    if not messages:
                         await asyncio.sleep(self._poll_interval)
+
+                except Exception as exc:
+                    logger.error("[publisher-worker] Listener tick failed: %s", exc)
+                    await asyncio.sleep(self._poll_interval)
 
     async def _process(self, content_id: str) -> None:
         """Read DB record, validate, publish directly + send confirmation."""

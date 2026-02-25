@@ -17,9 +17,10 @@ from tavily import AsyncTavilyClient
 
 from account_profile import AccountProfile
 from config.settings import settings
-from services.generation_queue_service import GenerationQueueService
+from services.azure_bus_service import send_message_to_media_generation_queue
+from services.cosmos_db_service import save_media_metadata, update_content
 from services.instagram_service import InstagramService
-from services.media_metadata_service import get_content_by_id, query_content
+from services.cosmos_db_service import get_content_by_id, query_content
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +110,6 @@ def build_account_tools(
 
     # Services scoped to this account
     ig_service = InstagramService(account_id=target_account_id) if target_account_id else None
-    generation_queue = GenerationQueueService(account_name=account_name)
 
     # Tavily client
     api_key = settings.TAVILY_API_KEY
@@ -235,20 +235,85 @@ def build_account_tools(
         )
         return truncated
 
+    async def _create_content_record(
+        *,
+        media_type: str,
+        prompt: str,
+        aspect_ratio: str = "1:1",
+        resolution: str = "1K",
+        output_format: str = "png",
+        duration: int = 5,
+        video_model: str = "",
+        post_type: str = "post",
+        topic: str = "",
+        caption: str = "",
+        hashtags: list[str] | None = None,
+    ) -> dict:
+        model = settings.FAL_VIDEO_MODEL if media_type == "video" else settings.FAL_IMAGE_MODEL
+        doc = await save_media_metadata(
+            media_type=media_type,
+            blob_url="",
+            blob_name="",
+            prompt=prompt,
+            model=model,
+            aspect_ratio=aspect_ratio,
+            resolution="" if media_type == "video" else resolution,
+            duration_seconds=duration if media_type == "video" else None,
+            fal_url="",
+            post_type=post_type,
+            target_account_id=target_account_id,
+            target_account_name=profile.display_name,
+            description=topic,
+            caption=caption,
+            hashtags=hashtags,
+            approval_status="pending_review",
+            publish_status="pending",
+            extra={
+                "generation_status": "pending_review",
+                "output_format": output_format,
+                "video_model": video_model,
+                "account": account_name,
+                "source": "account_agent",
+            },
+        )
+        logger.info(
+            "[account:%s] Saved content plan %s (type=%s) — pending review",
+            account_name,
+            doc["id"],
+            media_type,
+        )
+        return doc
+
+    async def _submit_to_queue(content_id: str, media_type: str) -> None:
+        await update_content(content_id, {
+            "generation_status": "queued",
+            "approval_status": "approved_by_reviewer",
+            "generation_requested_at": datetime.now(timezone.utc).isoformat(),
+        })
+        try:
+            await send_message_to_media_generation_queue(
+                content_id=content_id,
+                media_type=media_type,
+                account=account_name,
+                subject="Media Generation",
+                message_id=content_id,
+            )
+        except Exception:
+            await update_content(content_id, {"generation_status": "pending_review"})
+            raise
+
     async def generate_image(
         prompt: str, aspect_ratio: str = "4:5", resolution: str = "1K", output_format: str = "png",
         caption: str = "", hashtags: list[str] | None = None, topic: str = "",
     ) -> dict:
         try:
-            doc = await generation_queue.create_content_record(
+            doc = await _create_content_record(
                 media_type="image",
                 prompt=_truncate_prompt(prompt, MAX_IMAGE_PROMPT_CHARS),
                 aspect_ratio=aspect_ratio,
                 resolution=resolution,
                 output_format=output_format,
                 post_type="post",
-                target_account_id=target_account_id,
-                target_account_name=profile.display_name,
                 topic=topic,
                 caption=caption,
                 hashtags=hashtags,
@@ -271,15 +336,13 @@ def build_account_tools(
         caption: str = "", hashtags: list[str] | None = None, topic: str = "",
     ) -> dict:
         try:
-            doc = await generation_queue.create_content_record(
+            doc = await _create_content_record(
                 media_type="video",
                 prompt=_truncate_prompt(prompt, MAX_VIDEO_PROMPT_CHARS),
                 aspect_ratio=aspect_ratio,
                 duration=duration,
                 video_model=video_model,
                 post_type="reel",
-                target_account_id=target_account_id,
-                target_account_name=profile.display_name,
                 topic=topic,
                 caption=caption,
                 hashtags=hashtags,
@@ -339,7 +402,7 @@ def build_account_tools(
             }
 
         try:
-            await generation_queue.submit_to_queue(content_id, record.get("media_type", "image"))
+            await _submit_to_queue(content_id, record.get("media_type", "image"))
             return {
                 "status": "queued",
                 "content_id": content_id,

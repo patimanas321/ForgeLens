@@ -37,9 +37,9 @@ from agents.trend_scout.agent import TrendScoutAgent
 from agents.approver.agent import ReviewQueueAgent
 from agents.publisher.agent import PublisherAgent
 from agents.content_reviewer.agent import ContentReviewerAgent
-from services.communicator_trigger_service import start_communicator_queue_trigger_worker
-from services.publisher_trigger_service import start_publisher_queue_trigger_worker
-from services.media_generation_worker import start_media_generation_worker
+from services.queue_triggers.communicator_trigger_service import start_communicator_queue_trigger_worker
+from services.queue_triggers.publisher_trigger_service import start_publisher_queue_trigger_worker
+from services.queue_triggers.media_generation_worker import start_media_generation_worker
 
 # --- Logging ---
 logging.basicConfig(

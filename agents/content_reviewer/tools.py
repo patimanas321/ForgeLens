@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 from config.settings import settings
 from services.content_safety_service import analyze_text, analyze_image_from_url
-from services.media_metadata_service import get_content_by_id
+from services.cosmos_db_service import get_content_by_id
 
 logger = logging.getLogger(__name__)
 
