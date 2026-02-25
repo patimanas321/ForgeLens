@@ -207,6 +207,28 @@ async def _publish_record(record: dict, account_name: str = "") -> dict:
             container_id = await svc.create_image_container(media_url, caption_text)
             media_id = await svc.publish_container(container_id)
 
+        verified_media = None
+        verify_error = ""
+        for _ in range(5):
+            try:
+                details = await svc.get_media_details(media_id)
+                if str(details.get("id", "")) == str(media_id):
+                    verified_media = details
+                    break
+            except Exception as exc:
+                verify_error = str(exc)
+            await asyncio.sleep(3)
+
+        if not verified_media:
+            return {
+                "status": "error",
+                "content_id": content_id,
+                "error": (
+                    f"Instagram returned media_id={media_id} but verification failed"
+                    + (f": {verify_error}" if verify_error else "")
+                ),
+            }
+
         # Update DB: mark as published
         await mark_content_published(content_id, media_id, container_id)
 
@@ -217,6 +239,7 @@ async def _publish_record(record: dict, account_name: str = "") -> dict:
             "post_type": post_type,
             "container_id": container_id,
             "instagram_media_id": media_id,
+            "instagram_permalink": verified_media.get("permalink", ""),
             "account": target_account_name or "default",
         }
     except Exception as e:

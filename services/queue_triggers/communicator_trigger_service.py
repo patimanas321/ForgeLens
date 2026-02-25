@@ -25,6 +25,35 @@ logger = logging.getLogger(__name__)
 QUEUE_REVIEW_PENDING = "review-pending"
 
 
+def _extract_content_id_from_message(msg) -> str:
+    try:
+        body = msg.body_as_json()
+        if isinstance(body, dict):
+            content_id = body.get("content_id")
+            return str(content_id).strip() if content_id else ""
+    except Exception:
+        pass
+
+    try:
+        body_str = msg.body_as_str(encoding="UTF-8")
+        parsed = json.loads(body_str)
+        if isinstance(parsed, dict):
+            content_id = parsed.get("content_id")
+            return str(content_id).strip() if content_id else ""
+    except Exception:
+        pass
+
+    try:
+        parsed = json.loads(str(msg))
+        if isinstance(parsed, dict):
+            content_id = parsed.get("content_id")
+            return str(content_id).strip() if content_id else ""
+    except Exception:
+        pass
+
+    return ""
+
+
 class CommunicatorQueueWorker:
     """Consumes ``review-pending`` messages and sends review notification emails."""
 
@@ -47,8 +76,7 @@ class CommunicatorQueueWorker:
                     )
                     for msg in messages:
                         try:
-                            body = json.loads(str(msg))
-                            content_id = body.get("content_id")
+                            content_id = _extract_content_id_from_message(msg)
                             if not content_id:
                                 logger.warning("[communicator-worker] Message missing content_id, completing")
                                 await receiver.complete_message(msg)

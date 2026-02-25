@@ -21,16 +21,17 @@ class ImageGeneratorService:
         aspect_ratio: str = "1:1",
         output_format: str = "png",
         resolution: str = "1K",
+        model_id: str | None = None,
     ) -> dict:
-        model_id = settings.IMAGE_GENERATION_MODEL.strip() or settings.AZURE_OPENAI_IMAGE_DEPLOYMENT
+        selected_model = (model_id or settings.IMAGE_GENERATION_MODEL).strip() or settings.AZURE_OPENAI_IMAGE_DEPLOYMENT
 
-        if model_id.lower().startswith("fal-ai/"):
+        if selected_model.lower().startswith("fal-ai/"):
             return await self._fal.submit_image_generation(
                 prompt=prompt,
                 aspect_ratio=aspect_ratio,
                 output_format=output_format,
                 resolution=resolution,
-                model_id=model_id,
+                model_id=selected_model,
             )
 
         size = self._aspect_ratio_to_dalle_size(aspect_ratio)
@@ -39,7 +40,7 @@ class ImageGeneratorService:
             size=size,
             quality="standard",
             style="vivid",
-            model_id=model_id,
+            model_id=selected_model,
         )
 
     @staticmethod

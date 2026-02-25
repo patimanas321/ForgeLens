@@ -13,7 +13,7 @@ import logging
 
 from agent_framework import FunctionTool
 from openai import AsyncAzureOpenAI
-from azure.identity.aio import DefaultAzureCredential as AsyncDefaultAzureCredential
+from azure.identity import DefaultAzureCredential
 from azure.identity import get_bearer_token_provider
 from pydantic import BaseModel, Field
 
@@ -31,14 +31,14 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _openai_client: AsyncAzureOpenAI | None = None
-_openai_credential: AsyncDefaultAzureCredential | None = None
+_openai_credential: DefaultAzureCredential | None = None
 
 
 async def _get_openai_client() -> AsyncAzureOpenAI:
     """Lazily create an async Azure OpenAI client for vision / chat calls."""
     global _openai_client, _openai_credential
     if _openai_client is None:
-        _openai_credential = AsyncDefaultAzureCredential(
+        _openai_credential = DefaultAzureCredential(
             managed_identity_client_id=settings.AZURE_CLIENT_ID
         )
         _openai_client = AsyncAzureOpenAI(

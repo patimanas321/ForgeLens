@@ -256,7 +256,7 @@ def build_account_tools(
             aspect_ratio=aspect_ratio,
             resolution="" if media_type == "video" else resolution,
             duration_seconds=duration if media_type == "video" else None,
-            fal_url="",
+            source_media_url="",
             post_type=post_type,
             target_account_id=target_account_id,
             target_account_name=profile.display_name,

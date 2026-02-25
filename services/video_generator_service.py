@@ -14,8 +14,9 @@ class VideoGeneratorService:
         prompt: str,
         duration_seconds: int = 5,
         aspect_ratio: str = "9:16",
+        model_id: str | None = None,
     ) -> dict:
-        selected_model = settings.VIDEO_GENERATION_MODEL.strip()
+        selected_model = (model_id or settings.VIDEO_GENERATION_MODEL).strip()
         if not selected_model:
             selected_model = settings.VIDEO_GENERATION_MODEL
 

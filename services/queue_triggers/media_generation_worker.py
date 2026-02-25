@@ -54,6 +54,35 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _extract_content_id_from_message(msg) -> str:
+    try:
+        body = msg.body_as_json()
+        if isinstance(body, dict):
+            content_id = body.get("content_id")
+            return str(content_id).strip() if content_id else ""
+    except Exception:
+        pass
+
+    try:
+        body_str = msg.body_as_str(encoding="UTF-8")
+        parsed = json.loads(body_str)
+        if isinstance(parsed, dict):
+            content_id = parsed.get("content_id")
+            return str(content_id).strip() if content_id else ""
+    except Exception:
+        pass
+
+    try:
+        parsed = json.loads(str(msg))
+        if isinstance(parsed, dict):
+            content_id = parsed.get("content_id")
+            return str(content_id).strip() if content_id else ""
+    except Exception:
+        pass
+
+    return ""
+
+
 async def _download(url: str, ext: str) -> Path:
     name = f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}.{ext}"
     path = Path(tempfile.gettempdir()) / name
@@ -93,8 +122,11 @@ class MediaGenerationWorker:
                 )
                 for msg in messages:
                     try:
-                        body = json.loads(str(msg))
-                        content_id = body["content_id"]
+                        content_id = _extract_content_id_from_message(msg)
+                        if not content_id:
+                            logger.warning("[gen-worker] Message missing content_id, completing")
+                            await receiver.complete_message(msg)
+                            continue
                         await self._submit_generation(content_id)
                         await receiver.complete_message(msg)
                     except Exception as exc:
@@ -120,18 +152,21 @@ class MediaGenerationWorker:
             return
 
         media_type = record.get("media_type", "image")
+        db_model = str(record.get("model", "")).strip()
         if media_type == "image":
             submission = await self._image_generator.generate(
                 prompt=record.get("prompt", ""),
                 aspect_ratio=record.get("aspect_ratio", "1:1"),
                 output_format=record.get("output_format", "png"),
                 resolution=record.get("resolution", "1K"),
+                model_id=db_model or None,
             )
         else:
             submission = await self._video_generator.generate(
                 prompt=record.get("prompt", ""),
                 duration_seconds=record.get("duration_seconds") or 5,
                 aspect_ratio=record.get("aspect_ratio", "9:16"),
+                model_id=db_model or None,
             )
 
         mode = str(submission.get("mode", "async")).lower()
@@ -279,6 +314,7 @@ class MediaGenerationWorker:
             "blob_url": blob_url,
             "blob_name": blob_info["blob_name"],
             "file_size_bytes": blob_info["file_size_bytes"],
+            "source_media_url": asset_url,
             "fal_url": asset_url,
             "media_review_status": "pending",
             "approval_status": "pending",

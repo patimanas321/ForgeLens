@@ -113,6 +113,21 @@ class InstagramService(BaseService):
             },
         )
 
+    async def get_media_details(
+        self,
+        media_id: str,
+        fields: str = "id,permalink,media_type,timestamp",
+    ) -> dict:
+        """Fetch a media object by ID to verify publish succeeded."""
+        url = f"{self.base_url}/{media_id}"
+        return await self._request(
+            url,
+            params={
+                "fields": fields,
+                "access_token": settings.INSTAGRAM_ACCESS_TOKEN,
+            },
+        )
+
     # ------------------------------------------------------------------
     # Insights / Analytics
     # ------------------------------------------------------------------

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from openai import AsyncAzureOpenAI
-from azure.identity.aio import DefaultAzureCredential as AsyncDefaultAzureCredential
+from azure.identity import DefaultAzureCredential
 from azure.identity import get_bearer_token_provider
 
 from config.settings import settings
@@ -10,11 +10,11 @@ from config.settings import settings
 class DalleImageService:
     def __init__(self) -> None:
         self._client: AsyncAzureOpenAI | None = None
-        self._credential: AsyncDefaultAzureCredential | None = None
+        self._credential: DefaultAzureCredential | None = None
 
     async def _get_client(self) -> AsyncAzureOpenAI:
         if self._client is None:
-            self._credential = AsyncDefaultAzureCredential(
+            self._credential = DefaultAzureCredential(
                 managed_identity_client_id=settings.AZURE_CLIENT_ID
             )
             self._client = AsyncAzureOpenAI(

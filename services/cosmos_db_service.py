@@ -65,7 +65,7 @@ async def save_media_metadata(
     height: int | None = None,
     duration_seconds: int | None = None,
     file_size_bytes: int | None = None,
-    fal_url: str = "",
+    source_media_url: str = "",
     post_type: str = "post",
     target_account_id: str = "",
     target_account_name: str = "",
@@ -88,7 +88,7 @@ async def save_media_metadata(
         width / height: Pixel dimensions (if known).
         duration_seconds: Video duration (images = ``None``).
         file_size_bytes: File size on disk.
-        fal_url: Original fal.ai CDN URL (before blob upload).
+        source_media_url: Original provider media URL (before blob upload).
         extra: Any additional metadata to store.
 
     Returns:
@@ -110,7 +110,7 @@ async def save_media_metadata(
         "height": height,
         "duration_seconds": duration_seconds,
         "file_size_bytes": file_size_bytes,
-        "fal_url": fal_url,
+        "source_media_url": source_media_url,
         "target_account_id": target_account_id,
         "target_account_name": target_account_name,
         "description": description,
@@ -130,6 +130,10 @@ async def save_media_metadata(
         "created_at": datetime.now(timezone.utc).isoformat(),
         **(extra or {}),
     }
+
+    # Backward compatibility for existing readers/records that still expect fal_url
+    if "fal_url" not in doc:
+        doc["fal_url"] = source_media_url
 
     created = await container.create_item(body=doc)
     logger.info(f"[cosmos] Saved metadata id={created['id']} type={media_type} blob={blob_url}")
