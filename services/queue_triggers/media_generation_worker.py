@@ -315,7 +315,6 @@ class MediaGenerationWorker:
             "blob_name": blob_info["blob_name"],
             "file_size_bytes": blob_info["file_size_bytes"],
             "source_media_url": asset_url,
-            "fal_url": asset_url,
             "media_review_status": "pending",
             "approval_status": "pending",
         }

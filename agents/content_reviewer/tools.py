@@ -97,6 +97,7 @@ class GetReviewGuidelinesInput(BaseModel):
 
 async def _llm_review_image(image_url: str, context: str = "") -> dict:
     """Call Azure OpenAI with vision to review a generated image."""
+    result_text = ""
     try:
         client = await _get_openai_client()
         user_content = [
@@ -110,12 +111,24 @@ async def _llm_review_image(image_url: str, context: str = "") -> dict:
             input=[{"role": "user", "content": user_content}],
         )
 
-        result_text = ""
-        for item in response.output:
-            if hasattr(item, "content"):
-                for block in item.content:
-                    if hasattr(block, "text"):
-                        result_text += block.text
+        output_items = getattr(response, "output", None) or []
+        for item in output_items:
+            content_blocks = getattr(item, "content", None) or []
+            for block in content_blocks:
+                block_text = getattr(block, "text", None)
+                if block_text:
+                    result_text += str(block_text)
+
+        if not result_text:
+            fallback_text = getattr(response, "output_text", None)
+            if fallback_text:
+                result_text = str(fallback_text)
+
+        if not result_text.strip():
+            return {
+                "verdict": "NEEDS_REVISION",
+                "summary": "LLM image review returned empty output.",
+            }
 
         return json.loads(result_text)
     except json.JSONDecodeError:

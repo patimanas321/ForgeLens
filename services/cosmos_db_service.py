@@ -131,10 +131,6 @@ async def save_media_metadata(
         **(extra or {}),
     }
 
-    # Backward compatibility for existing readers/records that still expect fal_url
-    if "fal_url" not in doc:
-        doc["fal_url"] = source_media_url
-
     created = await container.create_item(body=doc)
     logger.info(f"[cosmos] Saved metadata id={created['id']} type={media_type} blob={blob_url}")
     return created

@@ -119,6 +119,13 @@ async def approve_item(item_id: str, notes: str = "") -> dict:
         return {
             "error": f"Item {item_id} is not pending — current status: {item.get('approval_status')}"
         }
+    if item.get("media_review_status") != "approved":
+        return {
+            "error": (
+                f"Item {item_id} media review is not approved — "
+                f"current status: {item.get('media_review_status')}"
+            )
+        }
 
     updated = await set_approval_status(item_id, "approved", notes)
     if not updated:
