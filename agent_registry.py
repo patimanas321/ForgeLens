@@ -14,6 +14,7 @@ class Agent(str, Enum):
     ORCHESTRATOR = "orchestrator"
     TREND_SCOUT = "trend-scout"
     REVIEW_QUEUE = "review-queue"
+    CONTENT_REVIEWER = "content-reviewer"
     PUBLISHER = "publisher"
 
 
@@ -64,6 +65,22 @@ AGENT_REGISTRY: dict[Agent, AgentEntry] = {
         arg_description=(
             "The approval action to perform — e.g. 'Approve item <id>', "
             "'Reject item <id>', 'Show pending items', 'View approval history'."
+        ),
+    ),
+
+    # ---- Content Reviewer ----
+    Agent.CONTENT_REVIEWER: AgentEntry(
+        name="Content Reviewer",
+        description=(
+            "Safety and quality gate for all content. Reviews text plans "
+            "(prompts, captions, hashtags) before generation, and reviews "
+            "generated images/videos after generation. Uses Azure Content "
+            "Safety for hard moderation and LLM vision for nuanced review."
+        ),
+        tool_name="call_content_reviewer",
+        arg_description=(
+            "A review request — e.g. 'Review content plan <content_id>', "
+            "'Review generated image <content_id>', 'Check this caption for safety'."
         ),
     ),
 

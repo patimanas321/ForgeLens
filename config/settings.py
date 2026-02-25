@@ -85,6 +85,9 @@ class Settings:
     # --- Azure Service Bus (Review Queue) ---
     SERVICEBUS_NAMESPACE: str = os.environ.get("SERVICEBUS_NAMESPACE", "forgelens-bus.servicebus.windows.net")
 
+    # --- Azure AI Content Safety ---
+    CONTENT_SAFETY_ENDPOINT: str = os.environ.get("CONTENT_SAFETY_ENDPOINT", "https://forgelens-content-safety.cognitiveservices.azure.com/")
+
     # --- Azure Communication Services (Email Notifications) ---
     ACS_ENDPOINT: str = os.environ.get("ACS_ENDPOINT", "https://forgelens-acs.unitedstates.communication.azure.com")
     ACS_CONNECTION_STRING: str = os.environ.get("ACS_CONNECTION_STRING", "")

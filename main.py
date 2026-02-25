@@ -36,6 +36,7 @@ from agents.account.workflow import build_content_pipeline
 from agents.trend_scout.agent import TrendScoutAgent
 from agents.approver.agent import ReviewQueueAgent
 from agents.publisher.agent import PublisherAgent
+from agents.content_reviewer.agent import ContentReviewerAgent
 from services.communicator_trigger_service import start_communicator_queue_trigger_worker
 from services.publisher_trigger_service import start_publisher_queue_trigger_worker
 from services.media_generation_worker import start_media_generation_worker
@@ -81,6 +82,9 @@ def main():
     # --- Create delegable specialist agents (shared across all accounts) ---
     trend_scout_agent = TrendScoutAgent(ai_client)
     approver_agent = ReviewQueueAgent(ai_client)
+
+    # Content Reviewer — safety & quality gate (used by account + publisher agents)
+    content_reviewer_agent = ContentReviewerAgent(ai_client)
 
     # Publisher is standalone: queue listener + content_id publisher
     publisher_agent = PublisherAgent(ai_client)
@@ -132,6 +136,7 @@ def main():
         + [
             trend_scout_agent.agent,
             approver_agent.agent,
+            content_reviewer_agent.agent,
         ]
         + [publisher_agent.agent]            # Standalone publisher agent
     )
