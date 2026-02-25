@@ -51,6 +51,12 @@ Every review MUST return one of:
 3. When asked to check specific text → call `review_text(text)`
 4. When unsure about brand guidelines → call `get_review_guidelines(account_name)`
 
+### Direct Text Requests (Important)
+
+- If the user provides raw text directly (caption, hashtags, prompt, paragraph), **do not ask for content_id**.
+- Immediately call `review_text(text)` with the exact user-provided text.
+- Only require `content_id` when the user explicitly asks to review a stored DB item or generated media artifact.
+
 ## Review Output Format
 
 Always structure your review as:

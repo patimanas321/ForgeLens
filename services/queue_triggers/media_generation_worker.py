@@ -308,7 +308,7 @@ class MediaGenerationWorker:
             "file_size_bytes": blob_info["file_size_bytes"],
             "fal_url": asset_url,
             "media_review_status": "pending",
-            "human_approval_status": "pending",
+            "approval_status": "pending",
         }
 
         if media_type == "image" and "images" in result:
@@ -350,7 +350,7 @@ class MediaGenerationWorker:
                 subject=record.get("description") or "Instagram Post",
                 message_id=f"{content_id}-review",
             )
-            await update_content(content_id, {"human_approval_status": "pending"})
+            await update_content(content_id, {"approval_status": "pending"})
             logger.info(
                 "[gen-worker] Enqueued %s for human posting approval → review-pending queue",
                 content_id,

@@ -22,7 +22,6 @@ from services.content_safety_service import analyze_text, analyze_image_from_url
 from services.cosmos_db_service import (
     get_content_by_id,
     set_media_review_status,
-    set_prompt_review_status,
 )
 
 logger = logging.getLogger(__name__)
@@ -243,7 +242,6 @@ async def review_content_plan(content_id: str) -> dict:
 
     if not safety_result.safe:
         summary = f"Content blocked by Azure Content Safety. Categories flagged: {', '.join(safety_result.blocked_categories)}"
-        await set_prompt_review_status(content_id, "rejected", summary)
         return {
             "content_id": content_id,
             "verdict": "REJECTED",
@@ -261,8 +259,6 @@ async def review_content_plan(content_id: str) -> dict:
         "REJECTED": "rejected",
         "NEEDS_REVISION": "needs_revision",
     }
-    mapped_status = status_map.get(verdict, "needs_revision")
-    await set_prompt_review_status(content_id, mapped_status, llm_result.get("summary", ""))
 
     return {
         "content_id": content_id,

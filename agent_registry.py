@@ -91,7 +91,8 @@ AGENT_REGISTRY: dict[Agent, AgentEntry] = {
         tool_name="call_content_reviewer",
         arg_description=(
             "A review request — e.g. 'Review content plan <content_id>', "
-            "'Review generated image <content_id>', 'Check this caption for safety'."
+            "'Review generated image <content_id>', 'Check this caption for safety'. "
+            "For direct text checks, pass raw text directly (no content_id required)."
         ),
     ),
 

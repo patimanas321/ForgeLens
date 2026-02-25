@@ -16,7 +16,7 @@ from services.azure_bus_service import send_message_to_review_approved_queue
 from services.cosmos_db_service import (
     get_content_by_id,
     query_content,
-    set_human_approval_status,
+    set_approval_status,
 )
 
 logger = logging.getLogger(__name__)
@@ -59,8 +59,8 @@ class RequestEditsInput(BaseModel):
 # ------------------------------------------------------------------
 
 async def view_all_pending() -> dict:
-    """List all content items with human_approval_status='pending'."""
-    items = await query_content(human_approval_status="pending", limit=100)
+    """List all content items with approval_status='pending'."""
+    items = await query_content(approval_status="pending", limit=100)
     summary = []
     for item in items:
         summary.append({
@@ -90,7 +90,7 @@ async def view_approval_history(limit: int = 50) -> dict:
     """View reviewed items (approved / rejected / edit_requested)."""
     results = []
     for status in ("approved", "rejected", "edit_requested"):
-        items = await query_content(human_approval_status=status, limit=limit)
+        items = await query_content(approval_status=status, limit=limit)
         results.extend(items)
     results.sort(
         key=lambda x: x.get("human_reviewed_at") or x.get("created_at") or "",
@@ -101,7 +101,7 @@ async def view_approval_history(limit: int = 50) -> dict:
     for item in results:
         summary.append({
             "id": item.get("id"),
-            "human_approval_status": item.get("human_approval_status"),
+            "approval_status": item.get("approval_status"),
             "human_reviewed_at": item.get("human_reviewed_at"),
             "human_reviewer_notes": item.get("human_reviewer_notes", ""),
             "topic": item.get("description", ""),
@@ -115,12 +115,12 @@ async def approve_item(item_id: str, notes: str = "") -> dict:
     item = await get_content_by_id(item_id)
     if not item:
         return {"error": f"Item {item_id} not found in database."}
-    if item.get("human_approval_status") != "pending":
+    if item.get("approval_status") != "pending":
         return {
-            "error": f"Item {item_id} is not pending — current status: {item.get('human_approval_status')}"
+            "error": f"Item {item_id} is not pending — current status: {item.get('approval_status')}"
         }
 
-    updated = await set_human_approval_status(item_id, "approved", notes)
+    updated = await set_approval_status(item_id, "approved", notes)
     if not updated:
         return {"error": f"Failed to update item {item_id}."}
 
@@ -156,12 +156,12 @@ async def reject_item(item_id: str, notes: str = "") -> dict:
     item = await get_content_by_id(item_id)
     if not item:
         return {"error": f"Item {item_id} not found in database."}
-    if item.get("human_approval_status") != "pending":
+    if item.get("approval_status") != "pending":
         return {
-            "error": f"Item {item_id} is not pending — current status: {item.get('human_approval_status')}"
+            "error": f"Item {item_id} is not pending — current status: {item.get('approval_status')}"
         }
 
-    updated = await set_human_approval_status(item_id, "rejected", notes)
+    updated = await set_approval_status(item_id, "rejected", notes)
     if not updated:
         return {"error": f"Failed to update item {item_id}."}
 
@@ -179,12 +179,12 @@ async def request_edits(item_id: str, notes: str) -> dict:
     item = await get_content_by_id(item_id)
     if not item:
         return {"error": f"Item {item_id} not found in database."}
-    if item.get("human_approval_status") != "pending":
+    if item.get("approval_status") != "pending":
         return {
-            "error": f"Item {item_id} is not pending — current status: {item.get('human_approval_status')}"
+            "error": f"Item {item_id} is not pending — current status: {item.get('approval_status')}"
         }
 
-    updated = await set_human_approval_status(item_id, "edit_requested", notes)
+    updated = await set_approval_status(item_id, "edit_requested", notes)
     if not updated:
         return {"error": f"Failed to update item {item_id}."}
 
@@ -223,7 +223,7 @@ def build_review_queue_tools() -> list[FunctionTool]:
         ),
         FunctionTool(
             name="view_all_pending",
-            description="List all items awaiting human posting approval (human_approval_status='pending').",
+            description="List all items awaiting human posting approval (approval_status='pending').",
             input_model=ViewAllPendingInput,
             func=view_all_pending,
         ),
